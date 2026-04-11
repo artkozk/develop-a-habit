@@ -10,6 +10,7 @@ from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.handlers.states import DiaryStates
 from develop_a_habit.jobs.transcription_queue import enqueue_transcription
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="diary")
 
@@ -25,8 +26,19 @@ def _diary_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def show_diary_menu(message: Message) -> None:
-    await message.answer("Дневник: выберите действие", reply_markup=_diary_menu_keyboard())
+def _diary_waiting_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в дневник", callback_data="diary:menu")],
+        ]
+    )
+
+
+async def show_diary_menu(target: Message | CallbackQuery) -> None:
+    if isinstance(target, Message):
+        await target.answer("Дневник: выберите действие", reply_markup=_diary_menu_keyboard())
+        return
+    await safe_edit_text(target.message, "Дневник: выберите действие", reply_markup=_diary_menu_keyboard())
 
 
 async def _resolve_user_id(telegram_user_id: int) -> int:
@@ -44,14 +56,29 @@ async def _resolve_user_id(telegram_user_id: int) -> int:
 async def diary_add_text_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(DiaryStates.waiting_diary_text)
-    await callback.message.answer("Отправьте текст записи дневника.")
+    await safe_edit_text(
+        callback.message,
+        "Отправьте текст записи дневника.",
+        reply_markup=_diary_waiting_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "diary:add_voice")
 async def diary_add_voice_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(DiaryStates.waiting_diary_voice)
-    await callback.message.answer("Отправьте голосовое сообщение для дневника.")
+    await safe_edit_text(
+        callback.message,
+        "Отправьте голосовое сообщение для дневника.",
+        reply_markup=_diary_waiting_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "diary:menu")
+async def diary_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    await show_diary_menu(callback)
 
 
 @router.message(DiaryStates.waiting_diary_text)
@@ -116,7 +143,11 @@ async def diary_list(callback: CallbackQuery) -> None:
         entries = await services.diary_service.list_entries_for_date(user_id=user_id, entry_date=target_date)
 
     if not entries:
-        await callback.message.answer(f"За {target_date.strftime('%d.%m.%Y')} заметок нет.")
+        await safe_edit_text(
+            callback.message,
+            f"За {target_date.strftime('%d.%m.%Y')} заметок нет.",
+            reply_markup=_diary_menu_keyboard(),
+        )
         return
 
     lines = [f"Заметки за {target_date.strftime('%d.%m.%Y')}:\n"]
@@ -130,7 +161,7 @@ async def diary_list(callback: CallbackQuery) -> None:
             body = entry.text_body or "(без текста)"
             lines.append(f"{index}. 📝🎤 {body}")
 
-    await callback.message.answer("\n".join(lines), reply_markup=_diary_menu_keyboard())
+    await safe_edit_text(callback.message, "\n".join(lines), reply_markup=_diary_menu_keyboard())
 
     async with AsyncSessionFactory() as session:
         services = build_services(session)

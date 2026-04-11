@@ -106,10 +106,10 @@ async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
     for day in week:
         rows.append(
             [
-            InlineKeyboardButton(
-                text=f"{WEEKDAY_SHORT[day.weekday()]} {day.strftime('%d.%m')} {indicators[day]}",
-                callback_data=f"calendar:day:{day.isoformat()}",
-            )
+                InlineKeyboardButton(
+                    text=f"{WEEKDAY_SHORT[day.weekday()]} {day.strftime('%d.%m')} {indicators[day]}",
+                    callback_data=f"calendar:day:{day.isoformat()}",
+                )
             ]
         )
 
@@ -122,6 +122,20 @@ async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _calendar_day_keyboard(target_day: date) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️ К неделе",
+                    callback_data=f"calendar:back:{week_start(target_day).isoformat()}",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")],
+        ]
+    )
 
 
 async def _render_calendar(target: Message | CallbackQuery, telegram_user_id: int, start: date) -> None:
@@ -179,4 +193,15 @@ async def calendar_day_details(callback: CallbackQuery) -> None:
             body = entry.text_body or "(без текста)"
             lines.append(f"- {body}")
 
-    await callback.message.answer("\n".join(lines))
+    await safe_edit_text(
+        callback.message,
+        "\n".join(lines),
+        reply_markup=_calendar_day_keyboard(day),
+    )
+
+
+@router.callback_query(F.data.startswith("calendar:back:"))
+async def calendar_back_to_week(callback: CallbackQuery) -> None:
+    await callback.answer()
+    start = parse_iso_date(callback.data.split(":")[-1])
+    await _render_calendar(callback, telegram_user_id=callback.from_user.id, start=start)

@@ -85,6 +85,8 @@ def _resolve_action_slot_for_habit(habit: Habit, selected_slot: str, target_date
 
 def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
     if status is None:
+        if habit_type == HabitType.NEGATIVE:
+            return "✅"
         return "▫️"
     if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
         return "✅"
@@ -96,9 +98,7 @@ def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
 
 
 def _habit_emoji(habit: Habit) -> str:
-    if habit.icon_emoji:
-        return habit.icon_emoji
-    return "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
+    return habit.icon_emoji or ""
 
 
 def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
@@ -124,7 +124,8 @@ def _menu_keyboard(
         )
         status = checkin_map.get((habit.id, action_slot.value))
         marker = _status_marker(status, habit.habit_type)
-        item_text = f"{marker} {_habit_emoji(habit)} {habit.name}"
+        icon = _habit_emoji(habit)
+        item_text = f"{marker} {habit.name}" if not icon else f"{marker} {icon} {habit.name}"
         sport_target = compute_linear_target(habit, target_date=target_date)
         if sport_target is not None:
             sets, reps = sport_target
@@ -148,10 +149,12 @@ def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
     ]
 
     for habit in habits:
+        icon = _habit_emoji(habit)
+        habit_text = habit.name if not icon else f"{icon} {habit.name}"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{_habit_emoji(habit)} {habit.name}",
+                    text=habit_text,
                     callback_data=f"habits:edit:{habit.id}:manage",
                 ),
                 InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}:manage"),
@@ -311,10 +314,19 @@ def _sport_toggle_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _input_back_keyboard(back_callback: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)],
+        ]
+    )
+
+
 async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, selected_slot: str) -> None:
     settings = get_settings()
     view_mode = "all" if selected_slot == "all" else "auto"
     selected_slot = _resolve_selected_slot(selected_slot)
+    used_fallback = False
 
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -324,19 +336,28 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
         )
         target_date = date.today()
 
-        if selected_slot == "all":
+        if view_mode == "all":
             habits = await services.habit_service.list_habits(user.id)
         else:
             slot = TimeSlot(selected_slot)
             habits = await services.habit_service.list_due_habits(user.id, target_date=target_date, slot=slot)
+            if not habits:
+                # Fallback: current period is empty, so show all due habits for today.
+                habits = await services.habit_service.list_due_habits(user.id, target_date=target_date, slot=None)
+                used_fallback = True
         checkins = await services.habit_service.get_checkins_for_date(user_id=user.id, target_date=target_date)
 
     checkin_map = {(item.habit_id, item.time_slot.value): item.status for item in checkins}
-    title_slot = "все привычки" if selected_slot == "all" else f"слот: {SLOT_LABELS[TimeSlot(selected_slot)]}"
-    text = (
-        f"Привычки на сегодня ({title_slot}).\n"
-        "Тап по привычке: поставить/снять отметку."
-    )
+    if view_mode == "all":
+        title_slot = "все привычки"
+        detail_line = "Тап по привычке: поставить/снять отметку."
+    else:
+        title_slot = f"текущий период: {SLOT_LABELS[TimeSlot(selected_slot)]}"
+        detail_line = "Тап по привычке: поставить/снять отметку."
+        if used_fallback:
+            detail_line = "В текущем периоде пусто, показываю все привычки на сегодня."
+
+    text = f"Привычки на сегодня ({title_slot}).\n{detail_line}"
     keyboard = _menu_keyboard(
         habits=habits,
         selected_slot=selected_slot,
@@ -562,12 +583,16 @@ async def habits_goalcfg_set_start(callback: CallbackQuery, state: FSMContext) -
     await state.clear()
     await state.update_data(goalcfg_habit_id=habit_id)
     await state.set_state(HabitStates.waiting_goal_days)
-    await callback.message.answer("Введите цель в днях (например: 30).")
+    await safe_edit_text(
+        callback.message,
+        "Введите цель в днях (например: 30).",
+        reply_markup=_input_back_keyboard(f"habits:goalcfg:{habit_id}"),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:goalcfg:extend:"))
 async def habits_goalcfg_extend(callback: CallbackQuery) -> None:
-    await callback.answer("Проверяю...")
+    await callback.answer()
     habit_id = int(callback.data.split(":")[-1])
     settings = get_settings()
     async with AsyncSessionFactory() as session:
@@ -578,10 +603,18 @@ async def habits_goalcfg_extend(callback: CallbackQuery) -> None:
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.message.answer("Привычка не найдена")
+            await safe_edit_text(
+                callback.message,
+                "Привычка не найдена.",
+                reply_markup=_input_back_keyboard("habits:manage"),
+            )
             return
         if habit.goal_days is None or habit.goal_days <= 0 or habit.goal_start_date is None:
-            await callback.message.answer("Сначала установите цель в днях.")
+            await safe_edit_text(
+                callback.message,
+                "Сначала установите цель в днях.",
+                reply_markup=_input_back_keyboard(f"habits:goalcfg:{habit_id}"),
+            )
             return
 
         progress_items = await services.metrics_service.compute_habit_progress(
@@ -592,7 +625,11 @@ async def habits_goalcfg_extend(callback: CallbackQuery) -> None:
         )
         progress = next((item for item in progress_items if item.habit_id == habit.id), None)
         if progress is None or not progress.goal_reached:
-            await callback.message.answer("Цель еще не достигнута. Дойдите до нее и затем продлите.")
+            await safe_edit_text(
+                callback.message,
+                "Цель еще не достигнута. Продолжайте текущий цикл.",
+                reply_markup=_input_back_keyboard(f"habits:goalcfg:{habit_id}"),
+            )
             return
 
         habit.goal_completed_cycles = (habit.goal_completed_cycles or 0) + 1
@@ -604,7 +641,7 @@ async def habits_goalcfg_extend(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("habits:goalcfg:clear:"))
 async def habits_goalcfg_clear(callback: CallbackQuery) -> None:
-    await callback.answer("Сбрасываю...")
+    await callback.answer()
     habit_id = int(callback.data.split(":")[-1])
     settings = get_settings()
     async with AsyncSessionFactory() as session:
@@ -615,7 +652,11 @@ async def habits_goalcfg_clear(callback: CallbackQuery) -> None:
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.message.answer("Привычка не найдена")
+            await safe_edit_text(
+                callback.message,
+                "Привычка не найдена.",
+                reply_markup=_input_back_keyboard("habits:manage"),
+            )
             return
         habit.goal_days = None
         habit.goal_start_date = None
@@ -639,7 +680,11 @@ async def habits_sportcfg_base_start(callback: CallbackQuery, state: FSMContext)
     await state.clear()
     await state.update_data(sportcfg_habit_id=habit_id)
     await state.set_state(HabitStates.waiting_sport_update_target)
-    await callback.message.answer("Введите новый базовый план в формате NxM, например 2x12.")
+    await safe_edit_text(
+        callback.message,
+        "Введите новый базовый план в формате NxM, например 2x12.",
+        reply_markup=_input_back_keyboard(f"habits:sportcfg:{habit_id}"),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:sportcfg:step:"))
@@ -649,12 +694,16 @@ async def habits_sportcfg_step_start(callback: CallbackQuery, state: FSMContext)
     await state.clear()
     await state.update_data(sportcfg_habit_id=habit_id)
     await state.set_state(HabitStates.waiting_sport_update_step)
-    await callback.message.answer("Введите новый шаг прогрессии в повторах/неделю (целое число, например 1).")
+    await safe_edit_text(
+        callback.message,
+        "Введите новый шаг прогрессии в повторах/неделю (целое число, например 1).",
+        reply_markup=_input_back_keyboard(f"habits:sportcfg:{habit_id}"),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:sportcfg:toggle:"))
 async def habits_sportcfg_toggle(callback: CallbackQuery) -> None:
-    await callback.answer("Обновляю...")
+    await callback.answer()
     habit_id = int(callback.data.split(":")[-1])
 
     settings = get_settings()
@@ -666,7 +715,11 @@ async def habits_sportcfg_toggle(callback: CallbackQuery) -> None:
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.message.answer("Привычка не найдена")
+            await safe_edit_text(
+                callback.message,
+                "Привычка не найдена.",
+                reply_markup=_input_back_keyboard("habits:manage"),
+            )
             return
         habit.sport_progression_enabled = not habit.sport_progression_enabled
         await session.commit()
@@ -676,7 +729,7 @@ async def habits_sportcfg_toggle(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("habits:sportcfg:preset:"))
 async def habits_sportcfg_preset(callback: CallbackQuery) -> None:
-    await callback.answer("Применяю...")
+    await callback.answer()
     _, _, _, habit_id_raw, sets_raw, reps_raw = callback.data.split(":")
     habit_id = int(habit_id_raw)
     sets = int(sets_raw)
@@ -691,7 +744,11 @@ async def habits_sportcfg_preset(callback: CallbackQuery) -> None:
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.message.answer("Привычка не найдена")
+            await safe_edit_text(
+                callback.message,
+                "Привычка не найдена.",
+                reply_markup=_input_back_keyboard("habits:manage"),
+            )
             return
 
         habit.sport_base_sets = sets
@@ -768,6 +825,7 @@ async def _save_checkin_for_user(
 
 @router.callback_query(F.data.startswith("habits:tap:"))
 async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     _, _, habit_id_value, slot_value, view_mode = callback.data.split(":")
     habit_id = int(habit_id_value)
@@ -789,11 +847,14 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
     if habit is None:
-        await callback.answer("Привычка не найдена", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
 
     if existing is not None:
-        await callback.answer("Снимаю отметку...")
         async with AsyncSessionFactory() as session:
             services = build_services(session)
             user = await services.user_service.get_or_create_by_telegram_id(
@@ -812,8 +873,8 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
     sport_target = compute_linear_target(habit, target_date=date.today())
     if habit.is_sport and sport_target is not None:
         target_sets, target_reps = sport_target
-        await callback.answer()
-        await callback.message.answer(
+        await safe_edit_text(
+            callback.message,
             (
                 f"План для «{habit.name}»: {target_sets}x{target_reps}.\n"
                 "Смогли придержаться плана прогрессии?"
@@ -826,7 +887,6 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
-    await callback.answer("Ставлю отметку...")
     action = "done"
     if habit.habit_type == HabitType.NEGATIVE:
         action = "fail"
@@ -837,7 +897,11 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
         action=action,
     )
     if saved is None:
-        await callback.message.answer("Привычка не найдена")
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=view_mode)
 
@@ -845,7 +909,7 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("habits:fail:"))
 async def checkin_habit_fail(callback: CallbackQuery) -> None:
     _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
-    await callback.answer("Сохраняю...")
+    await callback.answer()
     saved = await _save_checkin_for_user(
         telegram_user_id=callback.from_user.id,
         habit_id=int(habit_id_value),
@@ -853,13 +917,18 @@ async def checkin_habit_fail(callback: CallbackQuery) -> None:
         action="fail",
     )
     if saved is None:
-        await callback.message.answer("Привычка не найдена")
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(selected_slot))
 
 
 @router.callback_query(F.data.startswith("habits:sportadherence:"))
 async def checkin_sport_adherence(callback: CallbackQuery) -> None:
+    await callback.answer()
     _, _, habit_id_value, slot_value, view_mode, decision = callback.data.split(":")
     habit_id = int(habit_id_value)
     slot = TimeSlot(slot_value)
@@ -875,7 +944,11 @@ async def checkin_sport_adherence(callback: CallbackQuery) -> None:
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
 
     if habit is None:
-        await callback.answer("Привычка не найдена", show_alert=True)
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
 
     target_sets = None
@@ -884,7 +957,6 @@ async def checkin_sport_adherence(callback: CallbackQuery) -> None:
     if target is not None:
         target_sets, target_reps = target
 
-    await callback.answer("Сохраняю...")
     saved = await _save_checkin_for_user(
         telegram_user_id=callback.from_user.id,
         habit_id=habit_id,
@@ -895,7 +967,11 @@ async def checkin_sport_adherence(callback: CallbackQuery) -> None:
         sport_plan_adhered=adhered,
     )
     if saved is None:
-        await callback.message.answer("Привычка не найдена")
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
     await _render_menu(
         callback,
@@ -912,7 +988,7 @@ async def checkin_habit_legacy(callback: CallbackQuery) -> None:
         return
 
     _, _, habit_id_value, slot_value, action = parts
-    await callback.answer("Сохраняю...")
+    await callback.answer()
     saved = await _save_checkin_for_user(
         telegram_user_id=callback.from_user.id,
         habit_id=int(habit_id_value),
@@ -920,7 +996,11 @@ async def checkin_habit_legacy(callback: CallbackQuery) -> None:
         action=action,
     )
     if saved is None:
-        await callback.message.answer("Привычка не найдена")
+        await safe_edit_text(
+            callback.message,
+            "Привычка не найдена.",
+            reply_markup=_input_back_keyboard("main:menu"),
+        )
         return
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(slot_value))
 
@@ -987,7 +1067,11 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
 
     if part == "done":
         if not selected:
-            await callback.message.answer("Выберите хотя бы 1 день")
+            await safe_edit_text(
+                callback.message,
+                "Выберите хотя бы 1 день недели.",
+                reply_markup=_weekday_keyboard(selected),
+            )
             return
         await state.update_data(weekdays=sorted(selected))
         await state.set_state(HabitStates.waiting_name)
@@ -1034,7 +1118,11 @@ async def add_habit_sport_type(callback: CallbackQuery, state: FSMContext) -> No
     if mode == "yes":
         await state.update_data(is_sport=True, sport_progression_enabled=True)
         await state.set_state(HabitStates.waiting_sport_target)
-        await callback.message.answer("Введите базовый план в формате 3x8 (подходы x повторы).")
+        await safe_edit_text(
+            callback.message,
+            "Введите базовый план в формате 3x8 (подходы x повторы).",
+            reply_markup=_input_back_keyboard("habits:manage"),
+        )
         return
 
     await state.update_data(
@@ -1217,10 +1305,13 @@ async def delete_habit(callback: CallbackQuery) -> None:
         )
         deleted = await services.habit_service.delete_habit(user.id, habit_id)
 
-    if deleted:
-        await callback.message.answer("Привычка удалена")
-    else:
-        await callback.message.answer("Не удалось удалить привычку")
+    if not deleted:
+        await safe_edit_text(
+            callback.message,
+            "Не удалось удалить привычку.",
+            reply_markup=_input_back_keyboard("habits:manage"),
+        )
+        return
 
     if context == "manage":
         await show_habits_manage_menu(callback, telegram_user_id=callback.from_user.id)
@@ -1236,7 +1327,12 @@ async def rename_habit_start(callback: CallbackQuery, state: FSMContext) -> None
     context = parts[3] if len(parts) > 3 else "routine"
     await state.update_data(rename_habit_id=habit_id, rename_context=context)
     await state.set_state(HabitStates.waiting_rename)
-    await callback.message.answer("Отправьте новое название привычки.")
+    back_callback = "habits:manage" if context == "manage" else "habits:menu:auto"
+    await safe_edit_text(
+        callback.message,
+        "Отправьте новое название привычки.",
+        reply_markup=_input_back_keyboard(back_callback),
+    )
 
 
 @router.message(HabitStates.waiting_rename)

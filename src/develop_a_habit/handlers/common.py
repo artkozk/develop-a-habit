@@ -28,10 +28,14 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 async def show_main_menu(message: Message, text: str | None = None) -> None:
-    await message.answer(
-        text or "Главное меню",
-        reply_markup=main_menu_keyboard(),
-    )
+    await message.answer(text or "Главное меню", reply_markup=main_menu_keyboard())
+
+
+async def render_main_menu(target: Message | CallbackQuery, text: str | None = None) -> None:
+    if isinstance(target, Message):
+        await show_main_menu(target, text=text)
+        return
+    await safe_edit_text(target.message, text or "Главное меню", reply_markup=main_menu_keyboard())
 
 
 @router.message(StateFilter(None), F.text)
@@ -42,7 +46,7 @@ async def open_menu_from_text(message: Message) -> None:
 @router.callback_query(F.data == "main:menu")
 async def main_menu_back(callback: CallbackQuery) -> None:
     await callback.answer()
-    await safe_edit_text(callback.message, "Главное меню", reply_markup=main_menu_keyboard())
+    await render_main_menu(callback, text="Главное меню")
 
 
 @router.callback_query(F.data.startswith("main:open:"))
@@ -56,15 +60,15 @@ async def main_menu_open(callback: CallbackQuery) -> None:
         return
 
     if section == "habits":
-        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="")
+        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="auto")
         return
 
     if section == "diary":
-        await show_diary_menu(callback.message)
+        await show_diary_menu(callback)
         return
 
     if section == "settings":
-        await show_settings_menu(callback.message)
+        await show_settings_menu(callback)
         return
 
-    await callback.message.answer("Раздел не найден")
+    await safe_edit_text(callback.message, "Раздел не найден", reply_markup=main_menu_keyboard())

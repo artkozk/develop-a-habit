@@ -182,8 +182,15 @@ async def _render_dayoff_view(
         await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
-async def show_settings_menu(message: Message) -> None:
-    await message.answer("Настройки и дополнительные разделы:", reply_markup=_settings_menu_keyboard())
+async def show_settings_menu(target: Message | CallbackQuery) -> None:
+    if isinstance(target, Message):
+        await target.answer("Настройки и дополнительные разделы:", reply_markup=_settings_menu_keyboard())
+        return
+    await safe_edit_text(
+        target.message,
+        "Настройки и дополнительные разделы:",
+        reply_markup=_settings_menu_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "settings:noop")
@@ -296,7 +303,7 @@ async def settings_open_section(callback: CallbackQuery) -> None:
         return
 
     if section == "search":
-        await show_search_menu(callback.message)
+        await show_search_menu(callback)
         return
 
     if section == "stats":
@@ -311,4 +318,8 @@ async def settings_open_section(callback: CallbackQuery) -> None:
         await export_stats_html_message(callback.message, telegram_user_id=callback.from_user.id)
         return
 
-    await callback.message.answer("Раздел не найден")
+    await safe_edit_text(
+        callback.message,
+        "Раздел не найден",
+        reply_markup=_settings_menu_keyboard(),
+    )

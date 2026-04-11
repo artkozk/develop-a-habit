@@ -111,6 +111,6 @@ async def stats_period(callback: CallbackQuery) -> None:
     await callback.answer()
     period = callback.data.split(":")[-1]
     if period not in {"week", "month", "year"}:
-        await callback.message.answer("Неверный период")
+        await safe_edit_text(callback.message, "Неверный период", reply_markup=_stats_keyboard("week"))
         return
     await _render_stats(callback, telegram_user_id=callback.from_user.id, period=period)

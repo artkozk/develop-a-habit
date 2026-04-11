@@ -7,6 +7,7 @@ from develop_a_habit.db.models import DiaryEntryType
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.handlers.states import SearchStates
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="search_notes")
 
@@ -21,8 +22,15 @@ def _search_menu_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def show_search_menu(message: Message) -> None:
-    await message.answer("Выберите тип поиска заметок:", reply_markup=_search_menu_keyboard())
+async def show_search_menu(target: Message | CallbackQuery) -> None:
+    if isinstance(target, Message):
+        await target.answer("Выберите тип поиска заметок:", reply_markup=_search_menu_keyboard())
+        return
+    await safe_edit_text(
+        target.message,
+        "Выберите тип поиска заметок:",
+        reply_markup=_search_menu_keyboard(),
+    )
 
 
 async def _resolve_user_id(telegram_user_id: int) -> int:
@@ -43,7 +51,22 @@ async def search_mode(callback: CallbackQuery, state: FSMContext) -> None:
     voice_only = mode == "voice"
     await state.update_data(search_voice_only=voice_only)
     await state.set_state(SearchStates.waiting_search_query)
-    await callback.message.answer("Введите текст для поиска заметок.")
+    await safe_edit_text(
+        callback.message,
+        "Введите текст для поиска заметок.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="search:menu")],
+            ]
+        ),
+    )
+
+
+@router.callback_query(F.data == "search:menu")
+async def search_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    await show_search_menu(callback)
 
 
 @router.message(SearchStates.waiting_search_query)
