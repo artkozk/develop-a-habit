@@ -76,6 +76,7 @@ class Habit(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(256))
+    icon_emoji: Mapped[str | None] = mapped_column(String(16), nullable=True)
     habit_type: Mapped[HabitType] = mapped_column(
         Enum(HabitType, name="habit_type", values_callable=_enum_values)
     )
@@ -195,3 +196,16 @@ class DiaryTranscript(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     entry: Mapped[DiaryEntry] = relationship(back_populates="transcript")
+
+
+class WeeklyPrompt(Base):
+    __tablename__ = "weekly_prompts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start", name="uq_weekly_prompt_user_week"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    week_start: Mapped[date] = mapped_column(Date, index=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    comment_saved: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -21,7 +21,12 @@ class HabitService:
         self.session = session
 
     async def create_habit(self, user_id: int, payload: HabitCreateInput) -> Habit:
-        habit = Habit(user_id=user_id, name=payload.name, habit_type=payload.habit_type)
+        habit = Habit(
+            user_id=user_id,
+            name=payload.name,
+            icon_emoji=payload.icon_emoji,
+            habit_type=payload.habit_type,
+        )
         self.session.add(habit)
         await self.session.flush()
 
@@ -90,8 +95,36 @@ class HabitService:
         await self.session.commit()
 
     async def add_day_off_date(self, user_id: int, exact_date: date) -> None:
-        self.session.add(DayOffRule(user_id=user_id, exact_date=exact_date))
+        exists = await self.session.scalar(
+            select(DayOffRule).where(
+                DayOffRule.user_id == user_id,
+                DayOffRule.exact_date == exact_date,
+            )
+        )
+        if exists is None:
+            self.session.add(DayOffRule(user_id=user_id, exact_date=exact_date))
         await self.session.commit()
+
+    async def remove_day_off_date(self, user_id: int, exact_date: date) -> None:
+        rule = await self.session.scalar(
+            select(DayOffRule).where(
+                DayOffRule.user_id == user_id,
+                DayOffRule.exact_date == exact_date,
+            )
+        )
+        if rule is not None:
+            await self.session.delete(rule)
+            await self.session.commit()
+
+    async def list_day_off_dates(self, user_id: int, start_date: date, end_date: date) -> set[date]:
+        query = select(DayOffRule).where(
+            DayOffRule.user_id == user_id,
+            DayOffRule.exact_date.is_not(None),
+            DayOffRule.exact_date >= start_date,
+            DayOffRule.exact_date <= end_date,
+        )
+        rules = list(await self.session.scalars(query))
+        return {rule.exact_date for rule in rules if rule.exact_date is not None}
 
     async def upsert_checkin(self, user_id: int, payload: CheckinInput) -> HabitCheckin:
         habit = await self.session.scalar(

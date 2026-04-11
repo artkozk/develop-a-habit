@@ -50,42 +50,45 @@ async def _build_week_indicators(user_id: int, start: date) -> dict[date, str]:
             end_date=end,
         )
 
-    checkins_by_day: dict[date, dict[int, CheckinStatus]] = defaultdict(dict)
+    checkins_by_day: dict[date, dict[tuple[int, str], CheckinStatus]] = defaultdict(dict)
     for checkin in checkins:
-        checkins_by_day[checkin.check_date][checkin.habit_id] = checkin.status
+        checkins_by_day[checkin.check_date][(checkin.habit_id, checkin.time_slot.value)] = checkin.status
 
     note_days = {entry.entry_date for entry in entries}
     indicators: dict[date, str] = {}
 
     for day in (start + timedelta(days=i) for i in range(7)):
-        due_habits = []
+        due_pairs: list[tuple[int, TimeSlot]] = []
         for habit in habits:
-            if any(is_rule_due(rule, day, slot=None) for rule in habit.schedule_rules):
-                due_habits.append(habit)
+            slots = {
+                rule.time_slot
+                for rule in habit.schedule_rules
+                if is_rule_due(rule, day, slot=None)
+            }
+            for slot in slots:
+                due_pairs.append((habit.id, slot))
 
-        if not due_habits:
+        if not due_pairs:
             indicators[day] = "▫️📝" if day in note_days else "▫️"
             continue
 
-        done_count = 0
+        success_count = 0
         fail_count = 0
         statuses = checkins_by_day.get(day, {})
 
-        for habit in due_habits:
-            status = statuses.get(habit.id)
+        for habit_id, slot in due_pairs:
+            status = statuses.get((habit_id, slot.value))
             if status is None:
                 continue
             if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
-                done_count += 1
+                success_count += 1
             elif status in {CheckinStatus.MISSED, CheckinStatus.VIOLATED}:
                 fail_count += 1
 
-        if done_count == len(due_habits):
-            base = "✅"
-        elif done_count > 0 and fail_count == 0:
-            base = "🟨"
-        elif fail_count > 0:
+        if fail_count > 0:
             base = "❌"
+        elif success_count == len(due_pairs):
+            base = "✅"
         else:
             base = "▫️"
 
@@ -99,20 +102,20 @@ async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
     week = [start + timedelta(days=i) for i in range(7)]
     indicators = await _build_week_indicators(user_id=user_id, start=start)
 
-    row: list[InlineKeyboardButton] = []
     for day in week:
-        row.append(
+        rows.append(
+            [
             InlineKeyboardButton(
-                text=f"{WEEKDAY_SHORT[day.weekday()]} {day.day} {indicators[day]}",
+                text=f"{WEEKDAY_SHORT[day.weekday()]} {day.strftime('%d.%m')} {indicators[day]}",
                 callback_data=f"calendar:day:{day.isoformat()}",
             )
+            ]
         )
-    rows.append(row)
 
     rows.append(
         [
-            InlineKeyboardButton(text="⬅️ Неделя", callback_data=f"calendar:shift:{start.isoformat()}:-1"),
-            InlineKeyboardButton(text="➡️ Неделя", callback_data=f"calendar:shift:{start.isoformat()}:1"),
+            InlineKeyboardButton(text="◀", callback_data=f"calendar:shift:{start.isoformat()}:-1"),
+            InlineKeyboardButton(text="▶", callback_data=f"calendar:shift:{start.isoformat()}:1"),
         ]
     )
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")])

@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class HabitStates(StatesGroup):
     waiting_name = State()
+    waiting_icon = State()
     waiting_rename = State()
 
 
@@ -13,3 +14,7 @@ class DiaryStates(StatesGroup):
 
 class SearchStates(StatesGroup):
     waiting_search_query = State()
+
+
+class WeeklyStates(StatesGroup):
+    waiting_weekly_comment = State()

@@ -171,3 +171,15 @@ async def diary_list(callback: CallbackQuery) -> None:
             lines.append(f"{index}. 📝🎤 {body}")
 
     await callback.message.answer("\n".join(lines), reply_markup=_diary_menu_keyboard())
+
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        for entry in entries:
+            if entry.entry_type not in {DiaryEntryType.VOICE, DiaryEntryType.MIXED}:
+                continue
+            voice = await services.diary_service.get_voice_by_entry_id(entry.id)
+            if voice is not None:
+                await callback.message.answer_voice(
+                    voice=voice.telegram_file_id,
+                    caption=f"🎧 Голосовая заметка #{entry.id}",
+                )

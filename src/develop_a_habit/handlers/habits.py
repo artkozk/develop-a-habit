@@ -23,6 +23,13 @@ SLOT_LABELS = {
     TimeSlot.ALL_DAY: "🗓️ Весь день",
 }
 
+SLOT_BADGES = {
+    TimeSlot.MORNING: "🌅",
+    TimeSlot.DAY: "☀️",
+    TimeSlot.EVENING: "🌙",
+    TimeSlot.ALL_DAY: "🗓️",
+}
+
 WEEKDAY_LABELS = {
     0: "Пн",
     1: "Вт",
@@ -33,7 +40,6 @@ WEEKDAY_LABELS = {
     6: "Вс",
 }
 
-LAST_CHECKIN_SNAPSHOT: dict[int, dict[str, str | int | None]] = {}
 SLOT_ORDER = {
     TimeSlot.MORNING: 0,
     TimeSlot.DAY: 1,
@@ -48,6 +54,13 @@ def _slot_button(slot: TimeSlot, selected_slot: str) -> InlineKeyboardButton:
         text=f"{SLOT_LABELS[slot]} {marker}".strip(),
         callback_data=f"habits:menu:{slot.value}",
     )
+
+
+def _resolve_selected_slot(value: str | None) -> str:
+    if value in {"morning", "day", "evening", "all_day", "all"}:
+        return value
+    current_slot = resolve_slot_by_hour(datetime.now())
+    return current_slot.value
 
 
 def _habit_due_slots(habit: Habit, target_date: date) -> set[TimeSlot]:
@@ -95,6 +108,12 @@ def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
     return "▫️"
 
 
+def _habit_emoji(habit: Habit) -> str:
+    if habit.icon_emoji:
+        return habit.icon_emoji
+    return "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
+
+
 def _menu_keyboard(
     habits: list[Habit],
     selected_slot: str,
@@ -120,31 +139,43 @@ def _menu_keyboard(
             target_date=target_date,
         )
         status = checkin_map.get((habit.id, action_slot.value))
-        icon = "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
         marker = _status_marker(status, habit.habit_type)
-
+        item_text = f"{marker} {SLOT_BADGES[action_slot]} {_habit_emoji(habit)} {habit.name}"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{marker} {icon} {habit.name}",
+                    text=item_text,
                     callback_data=f"habits:tap:{habit.id}:{action_slot.value}:{selected_slot}",
-                )
-            ]
-        )
-        rows.append(
-            [
+                ),
                 InlineKeyboardButton(
                     text="❌",
                     callback_data=f"habits:fail:{habit.id}:{action_slot.value}:{selected_slot}",
                 ),
-                InlineKeyboardButton(text="✏️", callback_data=f"habits:edit:{habit.id}"),
-                InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}"),
             ]
         )
 
-    rows.append([InlineKeyboardButton(text="↩️ Отмена последней отметки", callback_data="habits:undo")])
-    rows.append([InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")],
+    ]
+
+    for habit in habits:
+        first_slot = habit.schedule_rules[0].time_slot if habit.schedule_rules else TimeSlot.DAY
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{SLOT_BADGES[first_slot]} {_habit_emoji(habit)} {habit.name}",
+                    callback_data=f"habits:edit:{habit.id}:manage",
+                ),
+                InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}:manage"),
+            ]
+        )
+
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -155,7 +186,7 @@ def _create_type_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✅ Позитивная", callback_data="habits:add:type:positive"),
                 InlineKeyboardButton(text="🚫 Негативная", callback_data="habits:add:type:negative"),
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
         ]
     )
 
@@ -167,7 +198,7 @@ def _create_slot_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="☀️ День", callback_data="habits:add:slot:day")],
             [InlineKeyboardButton(text="🌙 Вечер", callback_data="habits:add:slot:evening")],
             [InlineKeyboardButton(text="🗓️ Весь день", callback_data="habits:add:slot:all_day")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
         ]
     )
 
@@ -178,7 +209,7 @@ def _create_schedule_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Каждый день", callback_data="habits:add:schedule:daily")],
             [InlineKeyboardButton(text="Через день", callback_data="habits:add:schedule:every_other_day")],
             [InlineKeyboardButton(text="Конкретные дни недели", callback_data="habits:add:schedule:specific_weekdays")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
         ]
     )
 
@@ -200,15 +231,8 @@ def _weekday_keyboard(selected: set[int]) -> InlineKeyboardMarkup:
     if chunk:
         rows.append(chunk)
     rows.append([InlineKeyboardButton(text="Готово", callback_data="habits:add:weekday:done")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _resolve_selected_slot(value: str | None) -> str:
-    if value in {"morning", "day", "evening", "all_day", "all"}:
-        return value
-    current_slot = resolve_slot_by_hour(datetime.now())
-    return current_slot.value
 
 
 async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, selected_slot: str) -> None:
@@ -232,7 +256,7 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
 
     checkin_map = {(item.habit_id, item.time_slot.value): item.status for item in checkins}
     title_slot = "все привычки" if selected_slot == "all" else f"слот: {SLOT_LABELS[TimeSlot(selected_slot)]}"
-    text = f"Привычки на сегодня ({title_slot}).\nВыберите действие:"
+    text = f"Привычки на сегодня ({title_slot})."
     keyboard = _menu_keyboard(
         habits=habits,
         selected_slot=selected_slot,
@@ -244,6 +268,30 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
         await target.answer(text, reply_markup=keyboard)
     else:
         await target.message.edit_text(text, reply_markup=keyboard)
+
+
+async def show_habits_manage_menu(target: Message | CallbackQuery, telegram_user_id: int) -> None:
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=telegram_user_id,
+            timezone=settings.timezone_default,
+        )
+        habits = await services.habit_service.list_habits(user.id)
+
+    text = "Управление привычками:"
+    keyboard = _manage_keyboard(habits)
+    if isinstance(target, Message):
+        await target.answer(text, reply_markup=keyboard)
+    else:
+        await target.message.edit_text(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "habits:manage")
+async def habits_manage(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await show_habits_manage_menu(callback, telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("habits:menu"))
@@ -276,14 +324,6 @@ async def _apply_checkin(
             await callback.message.answer("Привычка не найдена")
             return
 
-        previous = await services.habit_service.get_checkin(
-            user_id=user.id,
-            habit_id=habit_id,
-            check_date=today,
-            slot=slot,
-        )
-        previous_status = previous.status.value if previous is not None else None
-
         if action == "done":
             new_status = CheckinStatus.DONE
         else:
@@ -300,13 +340,6 @@ async def _apply_checkin(
                 status=new_status.value,
             ),
         )
-
-        LAST_CHECKIN_SNAPSHOT[callback.from_user.id] = {
-            "habit_id": habit_id,
-            "slot": slot.value,
-            "check_date": today.isoformat(),
-            "previous_status": previous_status,
-        }
 
     await _render_menu(
         callback,
@@ -356,55 +389,11 @@ async def checkin_habit_legacy(callback: CallbackQuery) -> None:
     )
 
 
-@router.callback_query(F.data == "habits:undo")
-async def undo_last_checkin(callback: CallbackQuery) -> None:
-    await callback.answer()
-    snapshot = LAST_CHECKIN_SNAPSHOT.get(callback.from_user.id)
-    if snapshot is None:
-        await callback.message.answer("Нет действий для отката")
-        return
-
-    habit_id = int(snapshot["habit_id"])
-    slot = TimeSlot(str(snapshot["slot"]))
-    target_date = date.fromisoformat(str(snapshot["check_date"]))
-    previous_status = snapshot["previous_status"]
-
-    settings = get_settings()
-    async with AsyncSessionFactory() as session:
-        services = build_services(session)
-        user = await services.user_service.get_or_create_by_telegram_id(
-            telegram_user_id=callback.from_user.id,
-            timezone=settings.timezone_default,
-        )
-
-        if previous_status is None:
-            await services.habit_service.delete_checkin(
-                user_id=user.id,
-                habit_id=habit_id,
-                check_date=target_date,
-                slot=slot,
-            )
-        else:
-            await services.habit_service.upsert_checkin(
-                user_id=user.id,
-                payload=CheckinInput(
-                    habit_id=habit_id,
-                    check_date=target_date,
-                    time_slot=slot,
-                    status=str(previous_status),
-                ),
-            )
-
-    LAST_CHECKIN_SNAPSHOT.pop(callback.from_user.id, None)
-    await callback.message.answer("Последняя отметка отменена")
-    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
-
-
 @router.callback_query(F.data == "habits:add")
 async def add_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
-    await callback.message.edit_text("Шаг 1/4. Выберите тип привычки:", reply_markup=_create_type_keyboard())
+    await callback.message.edit_text("Шаг 1/5. Выберите тип привычки:", reply_markup=_create_type_keyboard())
 
 
 @router.callback_query(F.data.startswith("habits:add:type:"))
@@ -412,7 +401,7 @@ async def add_habit_type(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     habit_type = callback.data.split(":")[-1]
     await state.update_data(habit_type=habit_type)
-    await callback.message.edit_text("Шаг 2/4. Выберите слот времени:", reply_markup=_create_slot_keyboard())
+    await callback.message.edit_text("Шаг 2/5. Выберите слот времени:", reply_markup=_create_slot_keyboard())
 
 
 @router.callback_query(F.data.startswith("habits:add:slot:"))
@@ -420,7 +409,7 @@ async def add_habit_slot(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     slot = callback.data.split(":")[-1]
     await state.update_data(slot=slot)
-    await callback.message.edit_text("Шаг 3/4. Выберите расписание:", reply_markup=_create_schedule_keyboard())
+    await callback.message.edit_text("Шаг 3/5. Выберите расписание:", reply_markup=_create_schedule_keyboard())
 
 
 @router.callback_query(F.data.startswith("habits:add:schedule:"))
@@ -432,13 +421,12 @@ async def add_habit_schedule(callback: CallbackQuery, state: FSMContext) -> None
     if schedule == "specific_weekdays":
         await state.update_data(weekdays=[])
         await callback.message.edit_text(
-            "Шаг 4/4. Выберите дни недели:",
+            "Шаг 4/5. Выберите дни недели:",
             reply_markup=_weekday_keyboard(set()),
         )
     else:
         await state.set_state(HabitStates.waiting_name)
-        await callback.message.edit_text("Шаг 4/4. Отправьте название привычки текстом.")
-
+        await callback.message.edit_text("Шаг 4/5. Отправьте название привычки текстом.")
 
 
 @router.callback_query(F.data.startswith("habits:add:weekday:"))
@@ -454,7 +442,7 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
             return
         await state.update_data(weekdays=sorted(selected))
         await state.set_state(HabitStates.waiting_name)
-        await callback.message.edit_text("Шаг 4/4. Отправьте название привычки текстом.")
+        await callback.message.edit_text("Шаг 4/5. Отправьте название привычки текстом.")
         return
 
     weekday = int(part)
@@ -469,11 +457,23 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.message(HabitStates.waiting_name)
 async def add_habit_name(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
     name = message.text.strip() if message.text else ""
     if not name:
         await message.answer("Название не может быть пустым. Отправьте название еще раз.")
         return
+
+    await state.update_data(name=name)
+    await state.set_state(HabitStates.waiting_icon)
+    await message.answer("Шаг 5/5. Отправьте эмодзи для привычки (или '-' чтобы пропустить).")
+
+
+@router.message(HabitStates.waiting_icon)
+async def add_habit_icon(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    raw = message.text.strip() if message.text else ""
+    icon = None
+    if raw and raw != "-":
+        icon = raw[0]
 
     schedule_type = ScheduleType(data["schedule"])
     slot = TimeSlot(data["slot"])
@@ -501,7 +501,8 @@ async def add_habit_name(message: Message, state: FSMContext) -> None:
         rules.append(ScheduleRuleInput(schedule_type=ScheduleType.DAILY, time_slot=slot))
 
     payload = HabitCreateInput(
-        name=name,
+        name=data["name"],
+        icon_emoji=icon,
         habit_type=HabitType(data["habit_type"]),
         schedule_rules=rules,
     )
@@ -517,13 +518,16 @@ async def add_habit_name(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer("Привычка добавлена ✅")
-    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot=slot.value)
+    await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
 
 
 @router.callback_query(F.data.startswith("habits:delete:"))
 async def delete_habit(callback: CallbackQuery) -> None:
     await callback.answer()
-    habit_id = int(callback.data.split(":")[-1])
+    parts = callback.data.split(":")
+    habit_id = int(parts[2])
+    context = parts[3] if len(parts) > 3 else "routine"
+
     settings = get_settings()
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -538,14 +542,19 @@ async def delete_habit(callback: CallbackQuery) -> None:
     else:
         await callback.message.answer("Не удалось удалить привычку")
 
-    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="all")
+    if context == "manage":
+        await show_habits_manage_menu(callback, telegram_user_id=callback.from_user.id)
+    else:
+        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="all")
 
 
 @router.callback_query(F.data.startswith("habits:edit:"))
 async def rename_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    habit_id = int(callback.data.split(":")[-1])
-    await state.update_data(rename_habit_id=habit_id)
+    parts = callback.data.split(":")
+    habit_id = int(parts[2])
+    context = parts[3] if len(parts) > 3 else "routine"
+    await state.update_data(rename_habit_id=habit_id, rename_context=context)
     await state.set_state(HabitStates.waiting_rename)
     await callback.message.answer("Отправьте новое название привычки.")
 
@@ -559,6 +568,7 @@ async def rename_habit_finish(message: Message, state: FSMContext) -> None:
 
     data = await state.get_data()
     habit_id = int(data["rename_habit_id"])
+    context = data.get("rename_context", "routine")
 
     async with AsyncSessionFactory() as session:
         user_id = await _resolve_user_id(session, message.from_user.id)
@@ -573,7 +583,10 @@ async def rename_habit_finish(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer("Название обновлено ✅")
-    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="all")
+    if context == "manage":
+        await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
+    else:
+        await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="all")
 
 
 async def _resolve_user_id(session: AsyncSession, telegram_user_id: int) -> int:

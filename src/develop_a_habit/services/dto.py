@@ -17,6 +17,7 @@ class ScheduleRuleInput:
 class HabitCreateInput:
     name: str
     habit_type: HabitType
+    icon_emoji: str | None = None
     schedule_rules: list[ScheduleRuleInput] = field(default_factory=list)
 
 

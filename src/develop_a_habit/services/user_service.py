@@ -23,3 +23,7 @@ class UserService:
     async def get_by_telegram_id(self, telegram_user_id: int) -> User | None:
         query = select(User).where(User.telegram_user_id == telegram_user_id)
         return await self.session.scalar(query)
+
+    async def list_users(self) -> list[User]:
+        result = await self.session.scalars(select(User).order_by(User.id.asc()))
+        return list(result)
