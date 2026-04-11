@@ -103,8 +103,16 @@ def _habit_emoji(habit: Habit) -> str:
 
 def _strike_text(value: str) -> str:
     # Telegram inline button text has no rich text formatting.
-    # Use diagonal slash overlay so completed text is clearly crossed out in most fonts.
-    return "".join(f"{char}\u0338" if char != " " else " " for char in value)
+    # Use Unicode "combining short solidus overlay" (U+0337), which is visually cleaner
+    # in Telegram clients than long overlay variants. Punctuation is left unchanged.
+    punctuation = {":", ".", ",", ";", "!", "?", "-", "_", "/", "\\", "|", "(", ")", "[", "]"}
+    parts: list[str] = []
+    for char in value:
+        if char.isspace() or char in punctuation:
+            parts.append(char)
+        else:
+            parts.append(f"{char}\u0337")
+    return "".join(parts)
 
 
 def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
