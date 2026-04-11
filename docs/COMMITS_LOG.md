@@ -187,3 +187,11 @@
 - Почему: устранить переполнение `INTEGER` и связанные падения/задержки при нажатии кнопок; довести интерфейс до режима без command-хендлеров.
 - Подсистемы: database schema/migrations, handlers/common, startup UX.
 - Риск: средний (изменение схемы users).
+
+### aae24cd
+- Дата: 2026-04-11
+- Сообщение: `feat: simplify navigation and add all-day tap checkins`
+- Что сделано: главное меню сокращено до `Привычки/Дневник/Настройки`, вторичные разделы перенесены в `Настройки`, добавлен слот `all_day`, реализована отметка выполнения по нажатию на привычку, исправлен краш в checkin callback parsing.
+- Почему: уменьшить перегрузку интерфейса, ускорить ежедневные отметки и устранить падение при нажатиях.
+- Подсистемы: handlers UX/navigation, habits checkin flow, schedule engine, migrations/time_slot enum.
+- Риск: средний (изменение callback-контрактов и enum time_slot).
