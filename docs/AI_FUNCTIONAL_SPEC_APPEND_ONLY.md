@@ -121,3 +121,4 @@
 - Изменено на: `export_diary_message`/`export_stats_html_message` принимают явный `telegram_user_id` и в callback-сценариях используют `callback.from_user.id`. Причина: устранить ошибочный экспорт данных пользователя бота. Коммит: 2dd8903.
 - Изменено на: day-off UI переведен на exact-date toggles с контрактами `settings:dayoff:view|shift|toggle` для режимов `week|month`. Причина: плавающие выходные по датам. Коммит: 2dd8903.
 - Изменено на: добавлен weekly feedback flow с таблицей `weekly_prompts`, фоновым джобом `weekly_digest_loop`, callback `weekly:comment:{week_start}` и FSM `WeeklyStates.waiting_weekly_comment`. Причина: автоматический weekly review с сохранением комментария в дневник. Коммит: 2dd8903.
+- Изменено на: revision id миграции weekly-блока укорочен до `0007_habit_icon_weekly` (<=32 символов). Причина: `alembic_version.version_num` не принимал длинный идентификатор и upgrade падал на финальном шаге. Коммит: 8f41fd1.

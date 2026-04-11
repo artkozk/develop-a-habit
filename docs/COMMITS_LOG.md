@@ -227,3 +227,19 @@
 - Почему: снизить когнитивную нагрузку в ежедневном режиме и закрыть ключевые UX/надежность проблемы.
 - Подсистемы: handlers UX/navigation, habits FSM, export flow, diary playback, day-off UX, background jobs, db schema.
 - Риск: средний-высокий (изменены callback-контракты, добавлен фоновой джоб и новая таблица).
+
+### e73daf5
+- Дата: 2026-04-11
+- Сообщение: `docs: append routine ui and weekly review behavior updates`
+- Что сделано: append-only спецификации дополнены новыми правилами рутины, day-off по датам, weekly review и экспорт-контекстом.
+- Почему: сохранить полный audit trail по крупному UX-изменению.
+- Подсистемы: documentation.
+- Риск: низкий.
+
+### 8f41fd1
+- Дата: 2026-04-11
+- Сообщение: `fix: shorten 0007 migration revision id for alembic version table`
+- Что сделано: укорочен `revision` миграции `0007` до `0007_habit_icon_weekly`.
+- Почему: ошибка деплоя из-за длины `version_num` в таблице `alembic_version`.
+- Подсистемы: migrations/alembic compatibility.
+- Риск: низкий-средний (влияет на цепочку применения миграций).
