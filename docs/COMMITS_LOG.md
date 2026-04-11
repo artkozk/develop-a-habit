@@ -321,3 +321,11 @@
 - Почему: устранить спавн дублирующих сообщений, снизить задержки в UX и привести поведение негативных привычек к ожидаемой логике пользователя.
 - Подсистемы: handlers/navigation, habits checkin UX, calendar day view, search/diary/settings menus.
 - Риск: средний (изменение callback-потоков и отображения статусов).
+
+### 4ccb8df
+- Дата: 2026-04-11
+- Сообщение: `fix: correct owner context for non-sport habit creation`
+- Что сделано: исправлен путь создания привычки через callback `habits:add:sport:no`: сохранение выполняется с `callback.from_user.id`, убрана зависимость от `callback.message.from_user` (бота); обновлен weekly callback-экран на inline edit.
+- Почему: часть привычек создавалась не у пользователя и не появлялась в его рабочем меню; дополнительно устранен лишний спавн сообщений в weekly flow.
+- Подсистемы: handlers/habits create flow, handlers/weekly inline UX.
+- Риск: средний (затрагивает создание привычек и callback UX).
