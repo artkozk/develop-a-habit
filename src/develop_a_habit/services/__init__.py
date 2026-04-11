@@ -1,6 +1,7 @@
 from develop_a_habit.services.container import ServiceContainer, build_services
 from develop_a_habit.services.diary_service import DiaryService
 from develop_a_habit.services.dto import CheckinInput, HabitCreateInput, ScheduleRuleInput
+from develop_a_habit.services.export_service import ExportResult, ExportService
 from develop_a_habit.services.habit_service import HabitService
 from develop_a_habit.services.metrics_service import MetricsResult, MetricsService
 from develop_a_habit.services.transcription_service import (
@@ -17,6 +18,8 @@ __all__ = [
     "CheckinInput",
     "HabitCreateInput",
     "ScheduleRuleInput",
+    "ExportService",
+    "ExportResult",
     "HabitService",
     "MetricsService",
     "MetricsResult",
