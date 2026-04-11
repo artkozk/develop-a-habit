@@ -7,6 +7,7 @@ Create Date: 2026-04-11
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -16,16 +17,16 @@ branch_labels = None
 depends_on = None
 
 
-habit_type = sa.Enum("positive", "negative", name="habit_type", create_type=False)
-time_slot = sa.Enum("morning", "day", "evening", name="time_slot", create_type=False)
-schedule_type = sa.Enum(
+habit_type = postgresql.ENUM("positive", "negative", name="habit_type", create_type=False)
+time_slot = postgresql.ENUM("morning", "day", "evening", name="time_slot", create_type=False)
+schedule_type = postgresql.ENUM(
     "daily",
     "every_other_day",
     "specific_weekdays",
     name="schedule_type",
     create_type=False,
 )
-checkin_status = sa.Enum(
+checkin_status = postgresql.ENUM(
     "done",
     "missed",
     "violated",
