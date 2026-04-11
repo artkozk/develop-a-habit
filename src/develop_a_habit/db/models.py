@@ -77,6 +77,11 @@ class Habit(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(256))
     icon_emoji: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_sport: Mapped[bool] = mapped_column(Boolean, default=False)
+    sport_base_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sport_base_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sport_linear_step_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sport_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     habit_type: Mapped[HabitType] = mapped_column(
         Enum(HabitType, name="habit_type", values_callable=_enum_values)
     )
@@ -136,6 +141,10 @@ class HabitCheckin(Base):
     status: Mapped[CheckinStatus] = mapped_column(
         Enum(CheckinStatus, name="checkin_status", values_callable=_enum_values)
     )
+    actual_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_reps_csv: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 

@@ -25,6 +25,11 @@ class HabitService:
             user_id=user_id,
             name=payload.name,
             icon_emoji=payload.icon_emoji,
+            is_sport=payload.is_sport,
+            sport_base_sets=payload.sport_base_sets,
+            sport_base_reps=payload.sport_base_reps,
+            sport_linear_step_reps=payload.sport_linear_step_reps,
+            sport_start_date=payload.sport_start_date,
             habit_type=payload.habit_type,
         )
         self.session.add(habit)
@@ -149,11 +154,19 @@ class HabitService:
                 check_date=payload.check_date,
                 time_slot=payload.time_slot,
                 status=status,
+                actual_sets=payload.actual_sets,
+                actual_reps_csv=payload.actual_reps_csv,
+                target_sets=payload.target_sets,
+                target_reps=payload.target_reps,
                 note=payload.note,
             )
             self.session.add(checkin)
         else:
             checkin.status = status
+            checkin.actual_sets = payload.actual_sets
+            checkin.actual_reps_csv = payload.actual_reps_csv
+            checkin.target_sets = payload.target_sets
+            checkin.target_reps = payload.target_reps
             checkin.note = payload.note
 
         await self.session.commit()

@@ -4,6 +4,9 @@ from aiogram.fsm.state import State, StatesGroup
 class HabitStates(StatesGroup):
     waiting_name = State()
     waiting_icon = State()
+    waiting_sport_target = State()
+    waiting_sport_step = State()
+    waiting_sport_result = State()
     waiting_rename = State()
 
 

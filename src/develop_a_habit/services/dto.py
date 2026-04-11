@@ -18,6 +18,11 @@ class HabitCreateInput:
     name: str
     habit_type: HabitType
     icon_emoji: str | None = None
+    is_sport: bool = False
+    sport_base_sets: int | None = None
+    sport_base_reps: int | None = None
+    sport_linear_step_reps: int | None = None
+    sport_start_date: date | None = None
     schedule_rules: list[ScheduleRuleInput] = field(default_factory=list)
 
 
@@ -27,4 +32,8 @@ class CheckinInput:
     check_date: date
     time_slot: TimeSlot
     status: str
+    actual_sets: int | None = None
+    actual_reps_csv: str | None = None
+    target_sets: int | None = None
+    target_reps: int | None = None
     note: str | None = None

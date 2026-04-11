@@ -10,6 +10,7 @@ from develop_a_habit.config import get_settings
 from develop_a_habit.db.models import CheckinStatus, Habit, HabitType, ScheduleType, TimeSlot
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.domain.schedule_engine import is_rule_due
+from develop_a_habit.domain.sport_progress import compute_linear_target
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.states import HabitStates
 from develop_a_habit.services import CheckinInput, HabitCreateInput, ScheduleRuleInput, build_services
@@ -142,6 +143,10 @@ def _menu_keyboard(
         status = checkin_map.get((habit.id, action_slot.value))
         marker = _status_marker(status, habit.habit_type)
         item_text = f"{marker} {SLOT_BADGES[action_slot]} {_habit_emoji(habit)} {habit.name}"
+        sport_target = compute_linear_target(habit, target_date=target_date)
+        if sport_target is not None:
+            sets, reps = sport_target
+            item_text = f"{item_text} [{sets}x{reps}]"
         rows.append(
             [
                 InlineKeyboardButton(
@@ -236,6 +241,18 @@ def _weekday_keyboard(selected: set[int]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _sport_toggle_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🏋️ Да", callback_data="habits:add:sport:yes"),
+                InlineKeyboardButton(text="Нет", callback_data="habits:add:sport:no"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
+        ]
+    )
+
+
 async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, selected_slot: str) -> None:
     settings = get_settings()
     selected_slot = _resolve_selected_slot(selected_slot)
@@ -289,6 +306,64 @@ async def show_habits_manage_menu(target: Message | CallbackQuery, telegram_user
         await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
+def _build_rules_from_state(data: dict) -> tuple[list[ScheduleRuleInput], TimeSlot]:
+    schedule_type = ScheduleType(data["schedule"])
+    slot = TimeSlot(data["slot"])
+    rules: list[ScheduleRuleInput] = []
+
+    if schedule_type == ScheduleType.SPECIFIC_WEEKDAYS:
+        for weekday in data.get("weekdays", []):
+            rules.append(
+                ScheduleRuleInput(
+                    schedule_type=ScheduleType.SPECIFIC_WEEKDAYS,
+                    time_slot=slot,
+                    weekday=weekday,
+                )
+            )
+    elif schedule_type == ScheduleType.EVERY_OTHER_DAY:
+        rules.append(
+            ScheduleRuleInput(
+                schedule_type=ScheduleType.EVERY_OTHER_DAY,
+                time_slot=slot,
+                interval_days=2,
+                start_from=date.today(),
+            )
+        )
+    else:
+        rules.append(ScheduleRuleInput(schedule_type=ScheduleType.DAILY, time_slot=slot))
+
+    return rules, slot
+
+
+async def _save_new_habit_from_state(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    rules, _slot = _build_rules_from_state(data)
+    payload = HabitCreateInput(
+        name=data["name"],
+        icon_emoji=data.get("icon_emoji"),
+        habit_type=HabitType(data["habit_type"]),
+        is_sport=bool(data.get("is_sport", False)),
+        sport_base_sets=data.get("sport_base_sets"),
+        sport_base_reps=data.get("sport_base_reps"),
+        sport_linear_step_reps=data.get("sport_linear_step_reps"),
+        sport_start_date=date.today() if data.get("is_sport") else None,
+        schedule_rules=rules,
+    )
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=message.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        await services.habit_service.create_habit(user.id, payload)
+
+    await state.clear()
+    await message.answer("Привычка добавлена ✅")
+    await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
+
+
 @router.callback_query(F.data == "habits:manage")
 async def habits_manage(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -303,27 +378,28 @@ async def habits_menu_slot(callback: CallbackQuery) -> None:
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=selected_slot)
 
 
-async def _apply_checkin(
-    callback: CallbackQuery,
+async def _save_checkin_for_user(
+    telegram_user_id: int,
     habit_id: int,
     slot: TimeSlot,
     action: str,
-    selected_slot: str,
-) -> None:
-    await callback.answer("Сохраняю...")
+    *,
+    actual_sets: int | None = None,
+    actual_reps_csv: str | None = None,
+    target_sets: int | None = None,
+    target_reps: int | None = None,
+) -> Habit | None:
     today = date.today()
-
     settings = get_settings()
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         user = await services.user_service.get_or_create_by_telegram_id(
-            telegram_user_id=callback.from_user.id,
+            telegram_user_id=telegram_user_id,
             timezone=settings.timezone_default,
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.message.answer("Привычка не найдена")
-            return
+            return None
 
         if action == "done":
             new_status = CheckinStatus.DONE
@@ -339,38 +415,78 @@ async def _apply_checkin(
                 check_date=today,
                 time_slot=slot,
                 status=new_status.value,
+                actual_sets=actual_sets,
+                actual_reps_csv=actual_reps_csv,
+                target_sets=target_sets,
+                target_reps=target_reps,
             ),
         )
-
-    await _render_menu(
-        callback,
-        telegram_user_id=callback.from_user.id,
-        selected_slot=_resolve_selected_slot(selected_slot),
-    )
+        return habit
 
 
 @router.callback_query(F.data.startswith("habits:tap:"))
-async def checkin_habit_tap(callback: CallbackQuery) -> None:
+async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
     _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
-    await _apply_checkin(
-        callback=callback,
-        habit_id=int(habit_id_value),
-        slot=TimeSlot(slot_value),
+    habit_id = int(habit_id_value)
+    slot = TimeSlot(slot_value)
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+
+    if habit is None:
+        await callback.answer("Привычка не найдена", show_alert=True)
+        return
+
+    sport_target = compute_linear_target(habit, target_date=date.today())
+    if habit.is_sport and sport_target is not None:
+        target_sets, target_reps = sport_target
+        await callback.answer()
+        await state.update_data(
+            sport_checkin_habit_id=habit_id,
+            sport_checkin_slot=slot.value,
+            sport_checkin_selected_slot=selected_slot,
+            sport_checkin_target_sets=target_sets,
+            sport_checkin_target_reps=target_reps,
+        )
+        await state.set_state(HabitStates.waiting_sport_result)
+        await callback.message.answer(
+            f"План {target_sets}x{target_reps}. Введите факт по подходам через запятую, например: 10,10,8"
+        )
+        return
+
+    await callback.answer("Сохраняю...")
+    saved = await _save_checkin_for_user(
+        telegram_user_id=callback.from_user.id,
+        habit_id=habit_id,
+        slot=slot,
         action="done",
-        selected_slot=selected_slot,
     )
+    if saved is None:
+        await callback.message.answer("Привычка не найдена")
+        return
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(selected_slot))
 
 
 @router.callback_query(F.data.startswith("habits:fail:"))
 async def checkin_habit_fail(callback: CallbackQuery) -> None:
     _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
-    await _apply_checkin(
-        callback=callback,
+    await callback.answer("Сохраняю...")
+    saved = await _save_checkin_for_user(
+        telegram_user_id=callback.from_user.id,
         habit_id=int(habit_id_value),
         slot=TimeSlot(slot_value),
         action="fail",
-        selected_slot=selected_slot,
     )
+    if saved is None:
+        await callback.message.answer("Привычка не найдена")
+        return
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(selected_slot))
 
 
 @router.callback_query(F.data.startswith("habits:checkin:"))
@@ -381,13 +497,65 @@ async def checkin_habit_legacy(callback: CallbackQuery) -> None:
         return
 
     _, _, habit_id_value, slot_value, action = parts
-    await _apply_checkin(
-        callback=callback,
+    await callback.answer("Сохраняю...")
+    saved = await _save_checkin_for_user(
+        telegram_user_id=callback.from_user.id,
         habit_id=int(habit_id_value),
         slot=TimeSlot(slot_value),
         action=action,
-        selected_slot=slot_value,
     )
+    if saved is None:
+        await callback.message.answer("Привычка не найдена")
+        return
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(slot_value))
+
+
+@router.message(HabitStates.waiting_sport_result)
+async def checkin_sport_result(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Введите повторы по подходам, например: 10,10,8")
+        return
+
+    parts = [piece.strip() for piece in raw.replace(";", ",").split(",") if piece.strip()]
+    if not parts:
+        await message.answer("Не понял формат. Пример: 10,10,8")
+        return
+
+    reps: list[int] = []
+    for part in parts:
+        if not part.isdigit():
+            await message.answer("Только числа через запятую. Пример: 10,10,8")
+            return
+        reps.append(int(part))
+
+    habit_id = int(data["sport_checkin_habit_id"])
+    slot = TimeSlot(data["sport_checkin_slot"])
+    selected_slot = data["sport_checkin_selected_slot"]
+    target_sets = int(data["sport_checkin_target_sets"])
+    target_reps = int(data["sport_checkin_target_reps"])
+
+    saved = await _save_checkin_for_user(
+        telegram_user_id=message.from_user.id,
+        habit_id=habit_id,
+        slot=slot,
+        action="done",
+        actual_sets=len(reps),
+        actual_reps_csv=",".join(str(item) for item in reps),
+        target_sets=target_sets,
+        target_reps=target_reps,
+    )
+    if saved is None:
+        await message.answer("Привычка не найдена")
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer(
+        f"Зафиксировано: {len(reps)} подходов ({', '.join(str(item) for item in reps)})."
+    )
+    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot=_resolve_selected_slot(selected_slot))
 
 
 @router.callback_query(F.data == "habits:add")
@@ -483,56 +651,71 @@ async def add_habit_name(message: Message, state: FSMContext) -> None:
 
 @router.message(HabitStates.waiting_icon)
 async def add_habit_icon(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
     raw = message.text.strip() if message.text else ""
     icon = None
     if raw and raw != "-":
         icon = raw[0]
 
-    schedule_type = ScheduleType(data["schedule"])
-    slot = TimeSlot(data["slot"])
-    rules: list[ScheduleRuleInput] = []
+    await state.update_data(icon_emoji=icon)
+    await message.answer("Это спортивная привычка с линейным ростом?", reply_markup=_sport_toggle_keyboard())
 
-    if schedule_type == ScheduleType.SPECIFIC_WEEKDAYS:
-        for weekday in data.get("weekdays", []):
-            rules.append(
-                ScheduleRuleInput(
-                    schedule_type=ScheduleType.SPECIFIC_WEEKDAYS,
-                    time_slot=slot,
-                    weekday=weekday,
-                )
-            )
-    elif schedule_type == ScheduleType.EVERY_OTHER_DAY:
-        rules.append(
-            ScheduleRuleInput(
-                schedule_type=ScheduleType.EVERY_OTHER_DAY,
-                time_slot=slot,
-                interval_days=2,
-                start_from=date.today(),
-            )
-        )
-    else:
-        rules.append(ScheduleRuleInput(schedule_type=ScheduleType.DAILY, time_slot=slot))
 
-    payload = HabitCreateInput(
-        name=data["name"],
-        icon_emoji=icon,
-        habit_type=HabitType(data["habit_type"]),
-        schedule_rules=rules,
+@router.callback_query(F.data.startswith("habits:add:sport:"))
+async def add_habit_sport_type(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    mode = callback.data.split(":")[-1]
+    if mode == "yes":
+        await state.update_data(is_sport=True)
+        await state.set_state(HabitStates.waiting_sport_target)
+        await callback.message.answer("Введите базовый план в формате 3x8 (подходы x повторы).")
+        return
+
+    await state.update_data(
+        is_sport=False,
+        sport_base_sets=None,
+        sport_base_reps=None,
+        sport_linear_step_reps=None,
     )
+    await _save_new_habit_from_state(callback.message, state)
 
-    settings = get_settings()
-    async with AsyncSessionFactory() as session:
-        services = build_services(session)
-        user = await services.user_service.get_or_create_by_telegram_id(
-            telegram_user_id=message.from_user.id,
-            timezone=settings.timezone_default,
-        )
-        await services.habit_service.create_habit(user.id, payload)
 
-    await state.clear()
-    await message.answer("Привычка добавлена ✅")
-    await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
+@router.message(HabitStates.waiting_sport_target)
+async def add_habit_sport_target(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").lower().replace(" ", "")
+    if "x" not in raw:
+        await message.answer("Неверный формат. Пример: 3x8")
+        return
+
+    sets_raw, reps_raw = raw.split("x", 1)
+    if not sets_raw.isdigit() or not reps_raw.isdigit():
+        await message.answer("Неверный формат. Используйте только числа, например: 3x8")
+        return
+
+    sets = int(sets_raw)
+    reps = int(reps_raw)
+    if sets <= 0 or reps <= 0:
+        await message.answer("Подходы и повторы должны быть больше нуля.")
+        return
+
+    await state.update_data(sport_base_sets=sets, sport_base_reps=reps)
+    await state.set_state(HabitStates.waiting_sport_step)
+    await message.answer("Введите еженедельный шаг по повторам (целое число, например 1).")
+
+
+@router.message(HabitStates.waiting_sport_step)
+async def add_habit_sport_step(message: Message, state: FSMContext) -> None:
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Введите целое число шага, например 1")
+        return
+
+    step = int(raw)
+    if step < 0:
+        await message.answer("Шаг не может быть отрицательным.")
+        return
+
+    await state.update_data(sport_linear_step_reps=step, is_sport=True)
+    await _save_new_habit_from_state(message, state)
 
 
 @router.callback_query(F.data.startswith("habits:delete:"))
