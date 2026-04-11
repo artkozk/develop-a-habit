@@ -37,8 +37,9 @@ async def _day_indicator(user_id: int, day: date) -> str:
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         due_habits = await services.habit_service.list_due_habits(user_id=user_id, target_date=day)
+        has_notes = await services.diary_service.has_entries_for_date(user_id=user_id, entry_date=day)
         if not due_habits:
-            return "▫️"
+            return "▫️📝" if has_notes else "▫️"
 
         checkins = await services.habit_service.get_checkins_for_date(user_id=user_id, target_date=day)
         by_habit = {checkin.habit_id: checkin for checkin in checkins}
@@ -55,12 +56,15 @@ async def _day_indicator(user_id: int, day: date) -> str:
                 fail_count += 1
 
         if done_count == len(due_habits):
-            return "✅"
+            base = "✅"
+            return f"{base}📝" if has_notes else base
         if done_count > 0 and fail_count == 0:
-            return "🟨"
+            base = "🟨"
+            return f"{base}📝" if has_notes else base
         if fail_count > 0:
-            return "❌"
-        return "▫️"
+            base = "❌"
+            return f"{base}📝" if has_notes else base
+        return "▫️📝" if has_notes else "▫️"
 
 
 async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
@@ -125,6 +129,7 @@ async def calendar_day_details(callback: CallbackQuery) -> None:
         services = build_services(session)
         due_habits = await services.habit_service.list_due_habits(user_id=user_id, target_date=day)
         checkins = await services.habit_service.get_checkins_for_date(user_id=user_id, target_date=day)
+        entries = await services.diary_service.list_entries_for_date(user_id=user_id, entry_date=day)
 
     status_by_habit = {checkin.habit_id: checkin.status.value for checkin in checkins}
     lines = [f"День {day.strftime('%d.%m.%Y')}:"]
@@ -134,6 +139,15 @@ async def calendar_day_details(callback: CallbackQuery) -> None:
         for habit in due_habits:
             status = status_by_habit.get(habit.id, "ожидает")
             lines.append(f"- {habit.name}: {status}")
+
+    lines.append("")
+    lines.append("Заметки:")
+    if not entries:
+        lines.append("- Нет заметок")
+    else:
+        for entry in entries:
+            body = entry.text_body or "(без текста)"
+            lines.append(f"- {body}")
 
     await callback.message.answer("\n".join(lines))
     await callback.answer()

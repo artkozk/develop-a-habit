@@ -2,6 +2,8 @@ from develop_a_habit.db.base import Base
 from develop_a_habit.db.models import (
     CheckinStatus,
     DayOffRule,
+    DiaryEntry,
+    DiaryEntryType,
     Habit,
     HabitCheckin,
     HabitScheduleRule,
@@ -18,8 +20,10 @@ __all__ = [
     "HabitScheduleRule",
     "DayOffRule",
     "HabitCheckin",
+    "DiaryEntry",
     "HabitType",
     "ScheduleType",
     "TimeSlot",
     "CheckinStatus",
+    "DiaryEntryType",
 ]

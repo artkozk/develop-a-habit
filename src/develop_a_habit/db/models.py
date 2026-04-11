@@ -31,6 +31,12 @@ class CheckinStatus(str, enum.Enum):
     OPTIONAL_DONE = "optional_done"
 
 
+class DiaryEntryType(str, enum.Enum):
+    TEXT = "text"
+    VOICE = "voice"
+    MIXED = "mixed"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -41,6 +47,9 @@ class User(Base):
 
     habits: Mapped[list["Habit"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     day_off_rules: Mapped[list["DayOffRule"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    diary_entries: Mapped[list["DiaryEntry"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -104,3 +113,17 @@ class HabitCheckin(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     habit: Mapped[Habit] = relationship(back_populates="checkins")
+
+
+class DiaryEntry(Base):
+    __tablename__ = "diary_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, index=True)
+    entry_type: Mapped[DiaryEntryType] = mapped_column(Enum(DiaryEntryType, name="diary_entry_type"))
+    text_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    user: Mapped[User] = relationship(back_populates="diary_entries")
