@@ -1,12 +1,13 @@
+from collections import defaultdict
 from datetime import date, timedelta
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from develop_a_habit.config import get_settings
-from develop_a_habit.db.models import CheckinStatus
+from develop_a_habit.db.models import CheckinStatus, TimeSlot
 from develop_a_habit.db.session import AsyncSessionFactory
+from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.services import build_services
 
 router = Router(name="calendar")
@@ -33,50 +34,76 @@ async def _ensure_user_id(telegram_user_id: int) -> int:
         return user.id
 
 
-async def _day_indicator(user_id: int, day: date) -> str:
+async def _build_week_indicators(user_id: int, start: date) -> dict[date, str]:
+    end = start + timedelta(days=6)
     async with AsyncSessionFactory() as session:
         services = build_services(session)
-        due_habits = await services.habit_service.list_due_habits(user_id=user_id, target_date=day)
-        has_notes = await services.diary_service.has_entries_for_date(user_id=user_id, entry_date=day)
-        if not due_habits:
-            return "▫️📝" if has_notes else "▫️"
+        habits = await services.habit_service.list_habits(user_id=user_id, active_only=True)
+        checkins = await services.habit_service.get_checkins_for_range(
+            user_id=user_id,
+            start_date=start,
+            end_date=end,
+        )
+        entries = await services.diary_service.list_entries_range(
+            user_id=user_id,
+            start_date=start,
+            end_date=end,
+        )
 
-        checkins = await services.habit_service.get_checkins_for_date(user_id=user_id, target_date=day)
-        by_habit = {checkin.habit_id: checkin for checkin in checkins}
+    checkins_by_day: dict[date, dict[int, CheckinStatus]] = defaultdict(dict)
+    for checkin in checkins:
+        checkins_by_day[checkin.check_date][checkin.habit_id] = checkin.status
+
+    note_days = {entry.entry_date for entry in entries}
+    indicators: dict[date, str] = {}
+
+    for day in (start + timedelta(days=i) for i in range(7)):
+        due_habits = []
+        for habit in habits:
+            if any(is_rule_due(rule, day, slot=None) for rule in habit.schedule_rules):
+                due_habits.append(habit)
+
+        if not due_habits:
+            indicators[day] = "▫️📝" if day in note_days else "▫️"
+            continue
 
         done_count = 0
         fail_count = 0
+        statuses = checkins_by_day.get(day, {})
+
         for habit in due_habits:
-            checkin = by_habit.get(habit.id)
-            if checkin is None:
+            status = statuses.get(habit.id)
+            if status is None:
                 continue
-            if checkin.status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
+            if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
                 done_count += 1
-            elif checkin.status in {CheckinStatus.MISSED, CheckinStatus.VIOLATED}:
+            elif status in {CheckinStatus.MISSED, CheckinStatus.VIOLATED}:
                 fail_count += 1
 
         if done_count == len(due_habits):
             base = "✅"
-            return f"{base}📝" if has_notes else base
-        if done_count > 0 and fail_count == 0:
+        elif done_count > 0 and fail_count == 0:
             base = "🟨"
-            return f"{base}📝" if has_notes else base
-        if fail_count > 0:
+        elif fail_count > 0:
             base = "❌"
-            return f"{base}📝" if has_notes else base
-        return "▫️📝" if has_notes else "▫️"
+        else:
+            base = "▫️"
+
+        indicators[day] = f"{base}📝" if day in note_days else base
+
+    return indicators
 
 
 async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     week = [start + timedelta(days=i) for i in range(7)]
+    indicators = await _build_week_indicators(user_id=user_id, start=start)
 
     row: list[InlineKeyboardButton] = []
     for day in week:
-        indicator = await _day_indicator(user_id=user_id, day=day)
         row.append(
             InlineKeyboardButton(
-                text=f"{WEEKDAY_SHORT[day.weekday()]} {day.day} {indicator}",
+                text=f"{WEEKDAY_SHORT[day.weekday()]} {day.day} {indicators[day]}",
                 callback_data=f"calendar:day:{day.isoformat()}",
             )
         )
@@ -88,6 +115,7 @@ async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➡️ Неделя", callback_data=f"calendar:shift:{start.isoformat()}:1"),
         ]
     )
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -102,17 +130,11 @@ async def _render_calendar(target: Message | CallbackQuery, telegram_user_id: in
         await target.answer(text, reply_markup=keyboard)
     else:
         await target.message.edit_text(text, reply_markup=keyboard)
-        await target.answer()
-
-
-@router.message(Command("calendar"))
-async def calendar_current_week(message: Message) -> None:
-    start = week_start(date.today())
-    await _render_calendar(message, telegram_user_id=message.from_user.id, start=start)
 
 
 @router.callback_query(F.data.startswith("calendar:shift:"))
 async def calendar_shift(callback: CallbackQuery) -> None:
+    await callback.answer()
     _, _, start_iso, shift_value = callback.data.split(":")
     current_start = parse_iso_date(start_iso)
     offset = int(shift_value)
@@ -122,12 +144,16 @@ async def calendar_shift(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("calendar:day:"))
 async def calendar_day_details(callback: CallbackQuery) -> None:
+    await callback.answer()
     day = parse_iso_date(callback.data.split(":")[-1])
     user_id = await _ensure_user_id(callback.from_user.id)
 
     async with AsyncSessionFactory() as session:
         services = build_services(session)
-        due_habits = await services.habit_service.list_due_habits(user_id=user_id, target_date=day)
+        habits = await services.habit_service.list_habits(user_id=user_id, active_only=True)
+        due_habits = [
+            habit for habit in habits if any(is_rule_due(rule, day, slot=None) for rule in habit.schedule_rules)
+        ]
         checkins = await services.habit_service.get_checkins_for_date(user_id=user_id, target_date=day)
         entries = await services.diary_service.list_entries_for_date(user_id=user_id, entry_date=day)
 
@@ -150,4 +176,3 @@ async def calendar_day_details(callback: CallbackQuery) -> None:
             lines.append(f"- {body}")
 
     await callback.message.answer("\n".join(lines))
-    await callback.answer()

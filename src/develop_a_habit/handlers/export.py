@@ -1,6 +1,5 @@
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import FSInputFile, Message
+from aiogram import F, Router
+from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from develop_a_habit.config import get_settings
 from develop_a_habit.db.session import AsyncSessionFactory
@@ -9,8 +8,7 @@ from develop_a_habit.services import ExportService, StatsReportService, build_se
 router = Router(name="export")
 
 
-@router.message(Command("export_diary"))
-async def export_diary(message: Message) -> None:
+async def export_diary_message(message: Message) -> None:
     settings = get_settings()
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -27,8 +25,7 @@ async def export_diary(message: Message) -> None:
     )
 
 
-@router.message(Command("export_stats_html"))
-async def export_stats_html(message: Message) -> None:
+async def export_stats_html_message(message: Message) -> None:
     settings = get_settings()
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -46,3 +43,15 @@ async def export_stats_html(message: Message) -> None:
         FSInputFile(result.file_path),
         caption="HTML-отчет по статистике готов",
     )
+
+
+@router.callback_query(F.data == "export:diary")
+async def export_diary_callback(callback: CallbackQuery) -> None:
+    await callback.answer("Формирую архив...")
+    await export_diary_message(callback.message)
+
+
+@router.callback_query(F.data == "export:stats_html")
+async def export_stats_html_callback(callback: CallbackQuery) -> None:
+    await callback.answer("Готовлю HTML...")
+    await export_stats_html_message(callback.message)

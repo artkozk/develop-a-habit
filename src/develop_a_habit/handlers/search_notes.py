@@ -1,7 +1,4 @@
-from datetime import date
-
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -19,8 +16,13 @@ def _search_menu_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🔎 Все заметки", callback_data="search:mode:all")],
             [InlineKeyboardButton(text="🎤 Только голосовые", callback_data="search:mode:voice")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:more")],
         ]
     )
+
+
+async def show_search_menu(message: Message) -> None:
+    await message.answer("Выберите тип поиска заметок:", reply_markup=_search_menu_keyboard())
 
 
 async def _resolve_user_id(telegram_user_id: int) -> int:
@@ -34,19 +36,14 @@ async def _resolve_user_id(telegram_user_id: int) -> int:
         return user.id
 
 
-@router.message(Command("search_notes"))
-async def search_notes_start(message: Message) -> None:
-    await message.answer("Выберите тип поиска заметок:", reply_markup=_search_menu_keyboard())
-
-
 @router.callback_query(F.data.startswith("search:mode:"))
 async def search_mode(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     mode = callback.data.split(":")[-1]
     voice_only = mode == "voice"
     await state.update_data(search_voice_only=voice_only)
     await state.set_state(SearchStates.waiting_search_query)
     await callback.message.answer("Введите текст для поиска заметок.")
-    await callback.answer()
 
 
 @router.message(SearchStates.waiting_search_query)
@@ -71,7 +68,7 @@ async def search_notes_run(message: Message, state: FSMContext) -> None:
 
         if not entries:
             await state.clear()
-            await message.answer("Совпадений не найдено.")
+            await message.answer("Совпадений не найдено.", reply_markup=_search_menu_keyboard())
             return
 
         await message.answer(f"Найдено записей: {len(entries)}")
@@ -95,3 +92,4 @@ async def search_notes_run(message: Message, state: FSMContext) -> None:
                     await message.answer_voice(voice=voice.telegram_file_id)
 
     await state.clear()
+    await message.answer("Поиск завершен", reply_markup=_search_menu_keyboard())

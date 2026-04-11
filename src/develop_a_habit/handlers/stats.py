@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from develop_a_habit.config import get_settings
@@ -42,7 +41,8 @@ def _stats_keyboard(period: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=label("Неделя", "week"), callback_data="stats:period:week"),
                 InlineKeyboardButton(text=label("Месяц", "month"), callback_data="stats:period:month"),
                 InlineKeyboardButton(text=label("Год", "year"), callback_data="stats:period:year"),
-            ]
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:analytics")],
         ]
     )
 
@@ -78,18 +78,13 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
         await target.answer(text, reply_markup=keyboard)
     else:
         await target.message.edit_text(text, reply_markup=keyboard)
-        await target.answer()
-
-
-@router.message(Command("stats"))
-async def stats_default(message: Message) -> None:
-    await _render_stats(message, telegram_user_id=message.from_user.id, period="week")
 
 
 @router.callback_query(F.data.startswith("stats:period:"))
 async def stats_period(callback: CallbackQuery) -> None:
+    await callback.answer()
     period = callback.data.split(":")[-1]
     if period not in {"week", "month", "year"}:
-        await callback.answer("Неверный период", show_alert=True)
+        await callback.message.answer("Неверный период")
         return
     await _render_stats(callback, telegram_user_id=callback.from_user.id, period=period)

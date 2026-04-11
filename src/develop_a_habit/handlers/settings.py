@@ -1,5 +1,4 @@
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
 
@@ -39,6 +38,7 @@ def _settings_keyboard(selected: set[int]) -> InlineKeyboardMarkup:
         rows.append(row)
 
     rows.append([InlineKeyboardButton(text="💾 Сохранить выходные", callback_data="settings:dayoff:save")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:more")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -56,10 +56,8 @@ async def _load_weekday_dayoffs(telegram_user_id: int) -> tuple[int, set[int]]:
         return user.id, selected
 
 
-@router.message(Command("settings"))
-async def settings_menu(message: Message) -> None:
-    user_id, selected = await _load_weekday_dayoffs(message.from_user.id)
-    _ = user_id
+async def show_settings_menu(message: Message) -> None:
+    _user_id, selected = await _load_weekday_dayoffs(message.from_user.id)
     await message.answer(
         "Настройки выходных. Выберите дни недели, которые считаются выходными:",
         reply_markup=_settings_keyboard(selected),
@@ -68,6 +66,7 @@ async def settings_menu(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("settings:dayoff:toggle:"))
 async def settings_toggle_dayoff(callback: CallbackQuery) -> None:
+    await callback.answer()
     weekday = int(callback.data.split(":")[-1])
     _, selected = await _load_weekday_dayoffs(callback.from_user.id)
 
@@ -77,11 +76,11 @@ async def settings_toggle_dayoff(callback: CallbackQuery) -> None:
         selected.add(weekday)
 
     await callback.message.edit_reply_markup(reply_markup=_settings_keyboard(selected))
-    await callback.answer()
 
 
 @router.callback_query(F.data == "settings:dayoff:save")
 async def settings_save_dayoff(callback: CallbackQuery) -> None:
+    await callback.answer("Сохраняю...")
     settings = get_settings()
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -100,5 +99,4 @@ async def settings_save_dayoff(callback: CallbackQuery) -> None:
 
         await services.habit_service.replace_day_off_weekdays(user.id, sorted(selected))
 
-    await callback.answer("Выходные сохранены")
-    await callback.message.answer("Настройки выходных обновлены ✅")
+    await callback.message.answer("Настройки выходных обновлены ✅", reply_markup=_settings_keyboard(selected))

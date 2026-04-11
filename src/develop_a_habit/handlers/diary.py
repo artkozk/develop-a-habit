@@ -1,7 +1,6 @@
 from datetime import date
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -20,8 +19,13 @@ def _diary_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📝 Добавить запись", callback_data="diary:add_text")],
             [InlineKeyboardButton(text="🎤 Добавить голосовую", callback_data="diary:add_voice")],
             [InlineKeyboardButton(text="📅 Записи за сегодня", callback_data="diary:list:today")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")],
         ]
     )
+
+
+async def show_diary_menu(message: Message) -> None:
+    await message.answer("Дневник: выберите действие", reply_markup=_diary_menu_keyboard())
 
 
 async def _resolve_user_id(telegram_user_id: int) -> int:
@@ -35,23 +39,18 @@ async def _resolve_user_id(telegram_user_id: int) -> int:
         return user.id
 
 
-@router.message(Command("diary"))
-async def diary_menu(message: Message) -> None:
-    await message.answer("Дневник: выберите действие", reply_markup=_diary_menu_keyboard())
-
-
 @router.callback_query(F.data == "diary:add_text")
 async def diary_add_text_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(DiaryStates.waiting_diary_text)
     await callback.message.answer("Отправьте текст записи дневника.")
-    await callback.answer()
 
 
 @router.callback_query(F.data == "diary:add_voice")
 async def diary_add_voice_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.set_state(DiaryStates.waiting_diary_voice)
     await callback.message.answer("Отправьте голосовое сообщение для дневника.")
-    await callback.answer()
 
 
 @router.message(DiaryStates.waiting_diary_text)
@@ -147,6 +146,7 @@ async def diary_add_voice_wrong_type(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("diary:list:"))
 async def diary_list(callback: CallbackQuery) -> None:
+    await callback.answer()
     mode = callback.data.split(":")[-1]
     target_date = date.today() if mode == "today" else date.fromisoformat(mode)
     user_id = await _resolve_user_id(callback.from_user.id)
@@ -157,7 +157,6 @@ async def diary_list(callback: CallbackQuery) -> None:
 
     if not entries:
         await callback.message.answer(f"За {target_date.strftime('%d.%m.%Y')} заметок нет.")
-        await callback.answer()
         return
 
     lines = [f"Заметки за {target_date.strftime('%d.%m.%Y')}:\n"]
@@ -171,5 +170,4 @@ async def diary_list(callback: CallbackQuery) -> None:
             body = entry.text_body or "(без текста)"
             lines.append(f"{index}. 📝🎤 {body}")
 
-    await callback.message.answer("\n".join(lines))
-    await callback.answer()
+    await callback.message.answer("\n".join(lines), reply_markup=_diary_menu_keyboard())

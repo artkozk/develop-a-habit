@@ -6,16 +6,17 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.calendar import _render_calendar, week_start
-from develop_a_habit.handlers.diary import diary_menu as diary_menu_handler
+from develop_a_habit.handlers.diary import show_diary_menu
+from develop_a_habit.handlers.export import export_diary_message, export_stats_html_message
 from develop_a_habit.handlers.habits import _render_menu
-from develop_a_habit.handlers.search_notes import search_notes_start
-from develop_a_habit.handlers.settings import settings_menu
+from develop_a_habit.handlers.search_notes import show_search_menu
+from develop_a_habit.handlers.settings import show_settings_menu
 from develop_a_habit.handlers.stats import _render_stats
 
 router = Router(name="common")
 
 
-def _main_menu_keyboard() -> InlineKeyboardMarkup:
+def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -27,27 +28,65 @@ def _main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Дневник", callback_data="main:open:diary"),
             ],
             [
-                InlineKeyboardButton(text="Поиск заметок", callback_data="main:open:search"),
-                InlineKeyboardButton(text="Статистика", callback_data="main:open:stats"),
+                InlineKeyboardButton(text="Аналитика", callback_data="main:submenu:analytics"),
+                InlineKeyboardButton(text="Еще", callback_data="main:submenu:more"),
             ],
-            [InlineKeyboardButton(text="Настройки", callback_data="main:open:settings")],
-            [InlineKeyboardButton(text="Экспорт дневника", callback_data="main:open:export_diary")],
-            [InlineKeyboardButton(text="HTML статистика", callback_data="main:open:export_stats_html")],
         ]
+    )
+
+
+def analytics_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Статистика", callback_data="main:open:stats")],
+            [InlineKeyboardButton(text="HTML статистика", callback_data="main:open:export_stats_html")],
+            [InlineKeyboardButton(text="Экспорт дневника", callback_data="main:open:export_diary")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")],
+        ]
+    )
+
+
+def more_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Поиск заметок", callback_data="main:open:search")],
+            [InlineKeyboardButton(text="Настройки", callback_data="main:open:settings")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")],
+        ]
+    )
+
+
+async def show_main_menu(message: Message, text: str | None = None) -> None:
+    await message.answer(
+        text or "Главное меню",
+        reply_markup=main_menu_keyboard(),
     )
 
 
 @router.message(CommandStart())
 async def command_start(message: Message) -> None:
-    await message.answer(
-        "Привет! Develop A Habit запущен.\n"
-        "Основной интерфейс доступен через кнопки ниже:",
-        reply_markup=_main_menu_keyboard(),
-    )
+    await show_main_menu(message, text="Привет! Используйте меню кнопками ниже.")
+
+
+@router.callback_query(F.data.startswith("main:submenu:"))
+async def main_submenu(callback: CallbackQuery) -> None:
+    await callback.answer()
+    submenu = callback.data.split(":")[-1]
+
+    if submenu == "analytics":
+        await callback.message.edit_text("Аналитика", reply_markup=analytics_menu_keyboard())
+        return
+
+    if submenu == "more":
+        await callback.message.edit_text("Дополнительно", reply_markup=more_menu_keyboard())
+        return
+
+    await callback.message.edit_text("Главное меню", reply_markup=main_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("main:open:"))
 async def main_menu_open(callback: CallbackQuery) -> None:
+    await callback.answer()
     section = callback.data.split(":")[-1]
 
     if section == "today":
@@ -64,13 +103,11 @@ async def main_menu_open(callback: CallbackQuery) -> None:
         return
 
     if section == "diary":
-        await callback.answer()
-        await diary_menu_handler(callback.message)
+        await show_diary_menu(callback.message)
         return
 
     if section == "search":
-        await callback.answer()
-        await search_notes_start(callback.message)
+        await show_search_menu(callback.message)
         return
 
     if section == "stats":
@@ -78,18 +115,15 @@ async def main_menu_open(callback: CallbackQuery) -> None:
         return
 
     if section == "settings":
-        await callback.answer()
-        await settings_menu(callback.message)
+        await show_settings_menu(callback.message)
         return
 
     if section == "export_diary":
-        await callback.answer()
-        await callback.message.answer("Используйте команду /export_diary")
+        await export_diary_message(callback.message)
         return
 
     if section == "export_stats_html":
-        await callback.answer()
-        await callback.message.answer("Используйте команду /export_stats_html")
+        await export_stats_html_message(callback.message)
         return
 
-    await callback.answer("Раздел не найден", show_alert=True)
+    await callback.message.answer("Раздел не найден")

@@ -1,7 +1,6 @@
 from datetime import date, datetime
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import select
@@ -78,6 +77,7 @@ def _menu_keyboard(habits: list[Habit], selected_slot: str) -> InlineKeyboardMar
 
     rows.append([InlineKeyboardButton(text="↩️ Отмена последней отметки", callback_data="habits:undo")])
     rows.append([InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -87,7 +87,8 @@ def _create_type_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="✅ Позитивная", callback_data="habits:add:type:positive"),
                 InlineKeyboardButton(text="🚫 Негативная", callback_data="habits:add:type:negative"),
-            ]
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
         ]
     )
 
@@ -98,6 +99,7 @@ def _create_slot_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🌅 Утро", callback_data="habits:add:slot:morning")],
             [InlineKeyboardButton(text="☀️ День", callback_data="habits:add:slot:day")],
             [InlineKeyboardButton(text="🌙 Вечер", callback_data="habits:add:slot:evening")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
         ]
     )
 
@@ -108,6 +110,7 @@ def _create_schedule_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Каждый день", callback_data="habits:add:schedule:daily")],
             [InlineKeyboardButton(text="Через день", callback_data="habits:add:schedule:every_other_day")],
             [InlineKeyboardButton(text="Конкретные дни недели", callback_data="habits:add:schedule:specific_weekdays")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
         ]
     )
 
@@ -129,6 +132,7 @@ def _weekday_keyboard(selected: set[int]) -> InlineKeyboardMarkup:
     if chunk:
         rows.append(chunk)
     rows.append([InlineKeyboardButton(text="Готово", callback_data="habits:add:weekday:done")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -165,22 +169,11 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
         await target.answer(text, reply_markup=keyboard)
     else:
         await target.message.edit_text(text, reply_markup=keyboard)
-        await target.answer()
-
-
-@router.message(Command("habits"))
-async def habits_menu(message: Message) -> None:
-    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="")
-
-
-@router.message(Command("today"))
-async def today_menu(message: Message) -> None:
-    current_slot = resolve_slot_by_hour(datetime.now()).value
-    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot=current_slot)
 
 
 @router.callback_query(F.data.startswith("habits:menu"))
 async def habits_menu_slot(callback: CallbackQuery) -> None:
+    await callback.answer()
     parts = callback.data.split(":")
     selected_slot = _resolve_selected_slot(parts[2] if len(parts) > 2 else None)
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=selected_slot)
@@ -188,6 +181,7 @@ async def habits_menu_slot(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("habits:checkin:"))
 async def checkin_habit(callback: CallbackQuery) -> None:
+    await callback.answer("Сохраняю...")
     _, _, _, habit_id_value, slot_value, action = callback.data.split(":")
     habit_id = int(habit_id_value)
     slot = TimeSlot(slot_value)
@@ -202,7 +196,7 @@ async def checkin_habit(callback: CallbackQuery) -> None:
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
         if habit is None:
-            await callback.answer("Привычка не найдена", show_alert=True)
+            await callback.message.answer("Привычка не найдена")
             return
 
         previous = await services.habit_service.get_checkin(
@@ -237,15 +231,15 @@ async def checkin_habit(callback: CallbackQuery) -> None:
             "previous_status": previous_status,
         }
 
-    await callback.answer("Отметка сохранена")
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
 
 
 @router.callback_query(F.data == "habits:undo")
 async def undo_last_checkin(callback: CallbackQuery) -> None:
+    await callback.answer()
     snapshot = LAST_CHECKIN_SNAPSHOT.get(callback.from_user.id)
     if snapshot is None:
-        await callback.answer("Нет действий для отката", show_alert=True)
+        await callback.message.answer("Нет действий для отката")
         return
 
     habit_id = int(snapshot["habit_id"])
@@ -280,35 +274,36 @@ async def undo_last_checkin(callback: CallbackQuery) -> None:
             )
 
     LAST_CHECKIN_SNAPSHOT.pop(callback.from_user.id, None)
-    await callback.answer("Последняя отметка отменена")
+    await callback.message.answer("Последняя отметка отменена")
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
 
 
 @router.callback_query(F.data == "habits:add")
 async def add_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     await callback.message.edit_text("Шаг 1/4. Выберите тип привычки:", reply_markup=_create_type_keyboard())
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("habits:add:type:"))
 async def add_habit_type(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     habit_type = callback.data.split(":")[-1]
     await state.update_data(habit_type=habit_type)
     await callback.message.edit_text("Шаг 2/4. Выберите слот времени:", reply_markup=_create_slot_keyboard())
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("habits:add:slot:"))
 async def add_habit_slot(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     slot = callback.data.split(":")[-1]
     await state.update_data(slot=slot)
     await callback.message.edit_text("Шаг 3/4. Выберите расписание:", reply_markup=_create_schedule_keyboard())
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("habits:add:schedule:"))
 async def add_habit_schedule(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     schedule = callback.data.split(":")[-1]
     await state.update_data(schedule=schedule)
 
@@ -322,23 +317,22 @@ async def add_habit_schedule(callback: CallbackQuery, state: FSMContext) -> None
         await state.set_state(HabitStates.waiting_name)
         await callback.message.edit_text("Шаг 4/4. Отправьте название привычки текстом.")
 
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("habits:add:weekday:"))
 async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     part = callback.data.split(":")[-1]
     data = await state.get_data()
     selected = set(data.get("weekdays", []))
 
     if part == "done":
         if not selected:
-            await callback.answer("Выберите хотя бы 1 день", show_alert=True)
+            await callback.message.answer("Выберите хотя бы 1 день")
             return
         await state.update_data(weekdays=sorted(selected))
         await state.set_state(HabitStates.waiting_name)
         await callback.message.edit_text("Шаг 4/4. Отправьте название привычки текстом.")
-        await callback.answer()
         return
 
     weekday = int(part)
@@ -349,7 +343,6 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
 
     await state.update_data(weekdays=sorted(selected))
     await callback.message.edit_reply_markup(reply_markup=_weekday_keyboard(selected))
-    await callback.answer()
 
 
 @router.message(HabitStates.waiting_name)
@@ -407,6 +400,7 @@ async def add_habit_name(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("habits:delete:"))
 async def delete_habit(callback: CallbackQuery) -> None:
+    await callback.answer()
     habit_id = int(callback.data.split(":")[-1])
     settings = get_settings()
     async with AsyncSessionFactory() as session:
@@ -418,20 +412,20 @@ async def delete_habit(callback: CallbackQuery) -> None:
         deleted = await services.habit_service.delete_habit(user.id, habit_id)
 
     if deleted:
-        await callback.answer("Привычка удалена")
+        await callback.message.answer("Привычка удалена")
     else:
-        await callback.answer("Не удалось удалить привычку", show_alert=True)
+        await callback.message.answer("Не удалось удалить привычку")
 
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="all")
 
 
 @router.callback_query(F.data.startswith("habits:edit:"))
 async def rename_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     habit_id = int(callback.data.split(":")[-1])
     await state.update_data(rename_habit_id=habit_id)
     await state.set_state(HabitStates.waiting_rename)
     await callback.message.answer("Отправьте новое название привычки.")
-    await callback.answer()
 
 
 @router.message(HabitStates.waiting_rename)
