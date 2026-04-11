@@ -243,3 +243,19 @@
 - Почему: ошибка деплоя из-за длины `version_num` в таблице `alembic_version`.
 - Подсистемы: migrations/alembic compatibility.
 - Риск: низкий-средний (влияет на цепочку применения миграций).
+
+### e154847
+- Дата: 2026-04-11
+- Сообщение: `docs: append migration revision id hotfix details`
+- Что сделано: append-only спецификации и журнал коммитов дополнены деталями хотфикса по длине `revision`.
+- Почему: сохранить непрерывный журнал изменений и причин.
+- Подсистемы: documentation.
+- Риск: низкий.
+
+### c0e2e51
+- Дата: 2026-04-11
+- Сообщение: `feat: add safe message edits and async transcription queue`
+- Что сделано: добавлены безопасные обертки редактирования Telegram-сообщений (`safe_edit_*`), внедрена фоновая очередь транскрибации с восстановлением pending задач при старте, voice-handlers переведены на enqueue-модель.
+- Почему: убрать падения на `message is not modified` и сократить latency при обработке длинных голосовых.
+- Подсистемы: handlers UI safety, background jobs, STT pipeline.
+- Риск: средний (новая асинхронная модель транскрибации).
