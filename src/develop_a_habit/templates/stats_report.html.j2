@@ -123,5 +123,37 @@
       </tbody>
     </table>
   </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <h2>Привычки</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Привычка</th>
+          <th>За период</th>
+          <th>Серия</th>
+          <th>Всего дней</th>
+          <th>Цель</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in habits_progress %}
+        <tr>
+          <td>{% if row.icon_emoji %}{{ row.icon_emoji }} {% endif %}{{ row.name }}</td>
+          <td>{{ row.weekly_success_days }}/{{ row.weekly_due_days }}</td>
+          <td>{{ row.current_streak_days }} дн</td>
+          <td>{{ row.adherence_days_total }}</td>
+          <td>
+            {% if row.goal_days %}
+              {{ row.goal_progress_days }}/{{ row.goal_days }}{% if row.goal_reached %} ✅{% endif %}, циклов {{ row.goal_completed_cycles }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
 </body>
 </html>

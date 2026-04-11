@@ -8,6 +8,7 @@ class HabitStates(StatesGroup):
     waiting_sport_step = State()
     waiting_sport_update_target = State()
     waiting_sport_update_step = State()
+    waiting_goal_days = State()
     waiting_rename = State()
 
 

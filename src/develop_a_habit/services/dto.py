@@ -24,6 +24,9 @@ class HabitCreateInput:
     sport_linear_step_reps: int | None = None
     sport_progression_enabled: bool = True
     sport_start_date: date | None = None
+    goal_days: int | None = None
+    goal_start_date: date | None = None
+    goal_completed_cycles: int = 0
     schedule_rules: list[ScheduleRuleInput] = field(default_factory=list)
 
 

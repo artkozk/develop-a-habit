@@ -31,6 +31,12 @@ class StatsReportService:
             start_date=start,
             end_date=end,
         )
+        habits_progress = await self.metrics_service.compute_habit_progress(
+            user_id=user_id,
+            start_date=start,
+            end_date=min(end, date.today()),
+            today=date.today(),
+        )
 
         months: list[dict[str, object]] = []
         for month in range(1, 13):
@@ -93,6 +99,7 @@ class StatsReportService:
             },
             months=months,
             weeks=weeks,
+            habits_progress=habits_progress,
         )
 
         exports_dir = Path("exports")

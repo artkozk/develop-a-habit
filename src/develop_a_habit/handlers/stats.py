@@ -63,6 +63,11 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
             start_date=start,
             end_date=end,
         )
+        habit_progress = await services.metrics_service.compute_habit_progress(
+            user_id=user.id,
+            start_date=start,
+            end_date=end,
+        )
 
     text = (
         f"Статистика ({period})\n"
@@ -75,6 +80,24 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
         f"Подтягивания (повторы): {metrics.pullups_reps}\n"
         f"Отжимания (повторы): {metrics.pushups_reps}"
     )
+    lines = [text, "", "По привычкам:"]
+    for item in habit_progress:
+        icon = f"{item.icon_emoji} " if item.icon_emoji else ""
+        goal_part = ""
+        if item.goal_days is not None and item.goal_days > 0:
+            reached = " ✅" if item.goal_reached else ""
+            goal_part = (
+                f", цель {item.goal_progress_days}/{item.goal_days}{reached}, "
+                f"циклов {item.goal_completed_cycles}"
+            )
+        lines.append(
+            (
+                f"- {icon}{item.name}: неделя {item.weekly_success_days}/{item.weekly_due_days} дн, "
+                f"держитесь {item.current_streak_days} дн подряд, "
+                f"всего {item.adherence_days_total} дн{goal_part}"
+            )
+        )
+    text = "\n".join(lines)
 
     keyboard = _stats_keyboard(period)
     if isinstance(target, Message):

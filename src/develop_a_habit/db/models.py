@@ -83,6 +83,9 @@ class Habit(Base):
     sport_linear_step_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sport_progression_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sport_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    goal_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    goal_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    goal_completed_cycles: Mapped[int] = mapped_column(Integer, default=0)
     habit_type: Mapped[HabitType] = mapped_column(
         Enum(HabitType, name="habit_type", values_callable=_enum_values)
     )

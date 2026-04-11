@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -25,13 +25,6 @@ SLOT_LABELS = {
     TimeSlot.ALL_DAY: "🗓️ Весь день",
 }
 
-SLOT_BADGES = {
-    TimeSlot.MORNING: "🌅",
-    TimeSlot.DAY: "☀️",
-    TimeSlot.EVENING: "🌙",
-    TimeSlot.ALL_DAY: "🗓️",
-}
-
 WEEKDAY_LABELS = {
     0: "Пн",
     1: "Вт",
@@ -50,17 +43,9 @@ SLOT_ORDER = {
 }
 
 
-def _slot_button(slot: TimeSlot, selected_slot: str) -> InlineKeyboardButton:
-    marker = "•" if selected_slot == slot.value else ""
-    return InlineKeyboardButton(
-        text=f"{SLOT_LABELS[slot]} {marker}".strip(),
-        callback_data=f"habits:menu:{slot.value}",
-    )
-
-
 def _resolve_selected_slot(value: str | None) -> str:
-    if value in {"morning", "day", "evening", "all_day", "all"}:
-        return value
+    if value == "all":
+        return "all"
     current_slot = resolve_slot_by_hour(datetime.now())
     return current_slot.value
 
@@ -116,23 +101,20 @@ def _habit_emoji(habit: Habit) -> str:
     return "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
 
 
+def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
+    if view_mode == "all":
+        return InlineKeyboardButton(text="↩️ Текущий период", callback_data="habits:menu:auto")
+    return InlineKeyboardButton(text="📋 Показать все", callback_data="habits:menu:all")
+
+
 def _menu_keyboard(
     habits: list[Habit],
     selected_slot: str,
+    view_mode: str,
     target_date: date,
     checkin_map: dict[tuple[int, str], CheckinStatus],
 ) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            _slot_button(TimeSlot.MORNING, selected_slot),
-            _slot_button(TimeSlot.DAY, selected_slot),
-            _slot_button(TimeSlot.EVENING, selected_slot),
-        ],
-        [
-            _slot_button(TimeSlot.ALL_DAY, selected_slot),
-            InlineKeyboardButton(text="📋 Все", callback_data="habits:menu:all"),
-        ],
-    ]
+    rows: list[list[InlineKeyboardButton]] = [[_view_toggle_button(view_mode)]]
 
     for habit in habits:
         action_slot = _resolve_action_slot_for_habit(
@@ -142,7 +124,7 @@ def _menu_keyboard(
         )
         status = checkin_map.get((habit.id, action_slot.value))
         marker = _status_marker(status, habit.habit_type)
-        item_text = f"{marker} {SLOT_BADGES[action_slot]} {_habit_emoji(habit)} {habit.name}"
+        item_text = f"{marker} {_habit_emoji(habit)} {habit.name}"
         sport_target = compute_linear_target(habit, target_date=target_date)
         if sport_target is not None:
             sets, reps = sport_target
@@ -151,11 +133,7 @@ def _menu_keyboard(
             [
                 InlineKeyboardButton(
                     text=item_text,
-                    callback_data=f"habits:tap:{habit.id}:{action_slot.value}:{selected_slot}",
-                ),
-                InlineKeyboardButton(
-                    text="❌",
-                    callback_data=f"habits:fail:{habit.id}:{action_slot.value}:{selected_slot}",
+                    callback_data=f"habits:tap:{habit.id}:{action_slot.value}:{view_mode}",
                 ),
             ]
         )
@@ -170,14 +148,21 @@ def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
     ]
 
     for habit in habits:
-        first_slot = habit.schedule_rules[0].time_slot if habit.schedule_rules else TimeSlot.DAY
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{SLOT_BADGES[first_slot]} {_habit_emoji(habit)} {habit.name}",
+                    text=f"{_habit_emoji(habit)} {habit.name}",
                     callback_data=f"habits:edit:{habit.id}:manage",
                 ),
                 InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}:manage"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🎯 Настроить цель",
+                    callback_data=f"habits:goalcfg:{habit.id}",
+                )
             ]
         )
         if habit.is_sport:
@@ -194,20 +179,32 @@ def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _sport_adherence_keyboard(habit_id: int, slot: TimeSlot, selected_slot: str) -> InlineKeyboardMarkup:
+def _goal_settings_keyboard(habit_id: int, goal_reached: bool) -> InlineKeyboardMarkup:
+    extend_text = "🚀 Продлить цель" if goal_reached else "⏳ Продлить цель"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎯 Установить/изменить цель", callback_data=f"habits:goalcfg:set:{habit_id}")],
+            [InlineKeyboardButton(text=extend_text, callback_data=f"habits:goalcfg:extend:{habit_id}")],
+            [InlineKeyboardButton(text="🧹 Сбросить цель", callback_data=f"habits:goalcfg:clear:{habit_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
+        ]
+    )
+
+
+def _sport_adherence_keyboard(habit_id: int, slot: TimeSlot, view_mode: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="✅ Да, по плану",
-                    callback_data=f"habits:sportadherence:{habit_id}:{slot.value}:{selected_slot}:yes",
+                    callback_data=f"habits:sportadherence:{habit_id}:{slot.value}:{view_mode}:yes",
                 ),
                 InlineKeyboardButton(
                     text="❌ Нет, не по плану",
-                    callback_data=f"habits:sportadherence:{habit_id}:{slot.value}:{selected_slot}:no",
+                    callback_data=f"habits:sportadherence:{habit_id}:{slot.value}:{view_mode}:no",
                 ),
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"habits:menu:{selected_slot}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"habits:menu:{view_mode}")],
         ]
     )
 
@@ -316,6 +313,7 @@ def _sport_toggle_keyboard() -> InlineKeyboardMarkup:
 
 async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, selected_slot: str) -> None:
     settings = get_settings()
+    view_mode = "all" if selected_slot == "all" else "auto"
     selected_slot = _resolve_selected_slot(selected_slot)
 
     async with AsyncSessionFactory() as session:
@@ -335,10 +333,14 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
 
     checkin_map = {(item.habit_id, item.time_slot.value): item.status for item in checkins}
     title_slot = "все привычки" if selected_slot == "all" else f"слот: {SLOT_LABELS[TimeSlot(selected_slot)]}"
-    text = f"Привычки на сегодня ({title_slot})."
+    text = (
+        f"Привычки на сегодня ({title_slot}).\n"
+        "Тап по привычке: поставить/снять отметку."
+    )
     keyboard = _menu_keyboard(
         habits=habits,
         selected_slot=selected_slot,
+        view_mode=view_mode,
         target_date=target_date,
         checkin_map=checkin_map,
     )
@@ -433,6 +435,61 @@ async def _render_sport_config(
         await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
+async def _render_goal_config(
+    target: Message | CallbackQuery,
+    telegram_user_id: int,
+    habit_id: int,
+) -> None:
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=telegram_user_id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        progress_items = await services.metrics_service.compute_habit_progress(
+            user_id=user.id,
+            start_date=date.today() - timedelta(days=6),
+            end_date=date.today(),
+            today=date.today(),
+        )
+
+    if habit is None:
+        if isinstance(target, Message):
+            await target.answer("Привычка не найдена")
+        else:
+            await target.message.answer("Привычка не найдена")
+        return
+
+    progress = next((item for item in progress_items if item.habit_id == habit.id), None)
+    adherence_days_total = progress.adherence_days_total if progress is not None else 0
+    current_streak_days = progress.current_streak_days if progress is not None else 0
+    goal_progress_days = progress.goal_progress_days if progress is not None else 0
+    goal_reached = progress.goal_reached if progress is not None else False
+
+    goal_label = "не задана"
+    if habit.goal_days is not None and habit.goal_days > 0:
+        start = habit.goal_start_date.strftime("%d.%m.%Y") if habit.goal_start_date else "не задана"
+        reached_marker = " ✅" if goal_reached else ""
+        goal_label = f"{goal_progress_days}/{habit.goal_days} дней (старт {start}){reached_marker}"
+
+    text = (
+        f"🎯 Цель привычки\n"
+        f"Привычка: {habit.name}\n\n"
+        f"Держитесь: {current_streak_days} дн подряд\n"
+        f"Всего дней соблюдения: {adherence_days_total}\n"
+        f"Циклов цели завершено: {habit.goal_completed_cycles or 0}\n"
+        f"Текущая цель: {goal_label}"
+    )
+    keyboard = _goal_settings_keyboard(habit.id, goal_reached=goal_reached)
+
+    if isinstance(target, Message):
+        await target.answer(text, reply_markup=keyboard)
+    else:
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
+
+
 def _build_rules_from_state(data: dict) -> tuple[list[ScheduleRuleInput], TimeSlot]:
     schedule_type = ScheduleType(data["schedule"])
     slot = TimeSlot(data["slot"])
@@ -496,6 +553,83 @@ async def _save_new_habit_from_state(message: Message, state: FSMContext) -> Non
 async def habits_manage(callback: CallbackQuery) -> None:
     await callback.answer()
     await show_habits_manage_menu(callback, telegram_user_id=callback.from_user.id)
+
+
+@router.callback_query(F.data.startswith("habits:goalcfg:set:"))
+async def habits_goalcfg_set_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    habit_id = int(callback.data.split(":")[-1])
+    await state.clear()
+    await state.update_data(goalcfg_habit_id=habit_id)
+    await state.set_state(HabitStates.waiting_goal_days)
+    await callback.message.answer("Введите цель в днях (например: 30).")
+
+
+@router.callback_query(F.data.startswith("habits:goalcfg:extend:"))
+async def habits_goalcfg_extend(callback: CallbackQuery) -> None:
+    await callback.answer("Проверяю...")
+    habit_id = int(callback.data.split(":")[-1])
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        if habit is None:
+            await callback.message.answer("Привычка не найдена")
+            return
+        if habit.goal_days is None or habit.goal_days <= 0 or habit.goal_start_date is None:
+            await callback.message.answer("Сначала установите цель в днях.")
+            return
+
+        progress_items = await services.metrics_service.compute_habit_progress(
+            user_id=user.id,
+            start_date=date.today() - timedelta(days=6),
+            end_date=date.today(),
+            today=date.today(),
+        )
+        progress = next((item for item in progress_items if item.habit_id == habit.id), None)
+        if progress is None or not progress.goal_reached:
+            await callback.message.answer("Цель еще не достигнута. Дойдите до нее и затем продлите.")
+            return
+
+        habit.goal_completed_cycles = (habit.goal_completed_cycles or 0) + 1
+        habit.goal_start_date = date.today()
+        await session.commit()
+
+    await _render_goal_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
+
+
+@router.callback_query(F.data.startswith("habits:goalcfg:clear:"))
+async def habits_goalcfg_clear(callback: CallbackQuery) -> None:
+    await callback.answer("Сбрасываю...")
+    habit_id = int(callback.data.split(":")[-1])
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        if habit is None:
+            await callback.message.answer("Привычка не найдена")
+            return
+        habit.goal_days = None
+        habit.goal_start_date = None
+        await session.commit()
+
+    await _render_goal_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
+
+
+@router.callback_query(F.data.startswith("habits:goalcfg:"))
+async def habits_goalcfg_open(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    habit_id = int(callback.data.split(":")[-1])
+    await _render_goal_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
 
 
 @router.callback_query(F.data.startswith("habits:sportcfg:base:"))
@@ -635,7 +769,7 @@ async def _save_checkin_for_user(
 @router.callback_query(F.data.startswith("habits:tap:"))
 async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
+    _, _, habit_id_value, slot_value, view_mode = callback.data.split(":")
     habit_id = int(habit_id_value)
     slot = TimeSlot(slot_value)
 
@@ -647,9 +781,32 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
             timezone=settings.timezone_default,
         )
         habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        existing = await services.habit_service.get_checkin(
+            user_id=user.id,
+            habit_id=habit_id,
+            check_date=date.today(),
+            slot=slot,
+        )
 
     if habit is None:
         await callback.answer("Привычка не найдена", show_alert=True)
+        return
+
+    if existing is not None:
+        await callback.answer("Снимаю отметку...")
+        async with AsyncSessionFactory() as session:
+            services = build_services(session)
+            user = await services.user_service.get_or_create_by_telegram_id(
+                telegram_user_id=callback.from_user.id,
+                timezone=settings.timezone_default,
+            )
+            await services.habit_service.delete_checkin(
+                user_id=user.id,
+                habit_id=habit_id,
+                check_date=date.today(),
+                slot=slot,
+            )
+        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=view_mode)
         return
 
     sport_target = compute_linear_target(habit, target_date=date.today())
@@ -664,22 +821,25 @@ async def checkin_habit_tap(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=_sport_adherence_keyboard(
                 habit_id=habit_id,
                 slot=slot,
-                selected_slot=selected_slot,
+                view_mode=view_mode,
             ),
         )
         return
 
-    await callback.answer("Сохраняю...")
+    await callback.answer("Ставлю отметку...")
+    action = "done"
+    if habit.habit_type == HabitType.NEGATIVE:
+        action = "fail"
     saved = await _save_checkin_for_user(
         telegram_user_id=callback.from_user.id,
         habit_id=habit_id,
         slot=slot,
-        action="done",
+        action=action,
     )
     if saved is None:
         await callback.message.answer("Привычка не найдена")
         return
-    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=_resolve_selected_slot(selected_slot))
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=view_mode)
 
 
 @router.callback_query(F.data.startswith("habits:fail:"))
@@ -700,7 +860,7 @@ async def checkin_habit_fail(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("habits:sportadherence:"))
 async def checkin_sport_adherence(callback: CallbackQuery) -> None:
-    _, _, habit_id_value, slot_value, selected_slot, decision = callback.data.split(":")
+    _, _, habit_id_value, slot_value, view_mode, decision = callback.data.split(":")
     habit_id = int(habit_id_value)
     slot = TimeSlot(slot_value)
     adhered = decision == "yes"
@@ -740,7 +900,7 @@ async def checkin_sport_adherence(callback: CallbackQuery) -> None:
     await _render_menu(
         callback,
         telegram_user_id=callback.from_user.id,
-        selected_slot=_resolve_selected_slot(selected_slot),
+        selected_slot=view_mode,
     )
 
 
@@ -1004,6 +1164,43 @@ async def update_habit_sport_step(message: Message, state: FSMContext) -> None:
     await _render_sport_config(message, telegram_user_id=message.from_user.id, habit_id=habit_id)
 
 
+@router.message(HabitStates.waiting_goal_days)
+async def update_habit_goal_days(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    habit_id = int(data.get("goalcfg_habit_id", 0))
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Введите целое число дней, например: 30")
+        return
+
+    goal_days = int(raw)
+    if goal_days <= 0:
+        await message.answer("Цель должна быть больше 0 дней.")
+        return
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=message.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        if habit is None:
+            await message.answer("Привычка не найдена.")
+            await state.clear()
+            return
+        habit.goal_days = goal_days
+        habit.goal_start_date = date.today()
+        if habit.goal_completed_cycles is None:
+            habit.goal_completed_cycles = 0
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Цель обновлена ✅")
+    await _render_goal_config(message, telegram_user_id=message.from_user.id, habit_id=habit_id)
+
+
 @router.callback_query(F.data.startswith("habits:delete:"))
 async def delete_habit(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -1028,7 +1225,7 @@ async def delete_habit(callback: CallbackQuery) -> None:
     if context == "manage":
         await show_habits_manage_menu(callback, telegram_user_id=callback.from_user.id)
     else:
-        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="all")
+        await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot="auto")
 
 
 @router.callback_query(F.data.startswith("habits:edit:"))
@@ -1069,7 +1266,7 @@ async def rename_habit_finish(message: Message, state: FSMContext) -> None:
     if context == "manage":
         await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
     else:
-        await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="all")
+        await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="auto")
 
 
 async def _resolve_user_id(session: AsyncSession, telegram_user_id: int) -> int:

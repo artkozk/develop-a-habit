@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from develop_a_habit.db.models import CheckinStatus, Habit, HabitCheckin, HabitType
+from develop_a_habit.db.models import CheckinStatus, Habit, HabitCheckin, HabitType, TimeSlot
 from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.domain.sport_progress import compute_linear_target
 from develop_a_habit.services.habit_service import HabitService
@@ -26,6 +26,28 @@ class MetricsResult:
         if self.plan_slots == 0:
             return 0.0
         return round((self.completed_slots + self.extra_slots) / self.plan_slots * 100.0, 2)
+
+
+@dataclass(slots=True)
+class HabitProgressResult:
+    habit_id: int
+    name: str
+    icon_emoji: str | None
+    weekly_success_days: int
+    weekly_due_days: int
+    adherence_days_total: int
+    current_streak_days: int
+    goal_days: int | None
+    goal_progress_days: int
+    goal_completed_cycles: int
+    goal_reached: bool
+
+
+def _date_range(start_date: date, end_date: date):
+    cursor = start_date
+    while cursor <= end_date:
+        yield cursor
+        cursor += timedelta(days=1)
 
 
 class MetricsService:
@@ -55,11 +77,7 @@ class MetricsService:
             habit_map = {habit.id: habit for habit in due_habits}
 
             for habit in due_habits:
-                slots = {
-                    rule.time_slot
-                    for rule in habit.schedule_rules
-                    if is_rule_due(rule, target_date=cursor, slot=None)
-                }
+                slots = self._due_slots_for_habit(habit, cursor)
                 for slot in slots:
                     key = (habit.id, slot.value)
                     checkin = checkin_map.get(key)
@@ -99,9 +117,196 @@ class MetricsService:
             pullups_reps=pullups_reps,
         )
 
+    async def compute_habit_progress(
+        self,
+        user_id: int,
+        start_date: date,
+        end_date: date,
+        today: date | None = None,
+    ) -> list[HabitProgressResult]:
+        today = today or date.today()
+        period_start = start_date
+        period_end = min(end_date, today)
+        habits = await self.habit_service.list_habits(user_id=user_id, active_only=True)
+        if not habits:
+            return []
+
+        history_start = min(
+            (habit.created_at.date() if habit.created_at is not None else period_start) for habit in habits
+        )
+        history_start = min(history_start, period_start)
+        if history_start > today:
+            history_start = today
+
+        checkins = await self.habit_service.get_checkins_for_range(
+            user_id=user_id,
+            start_date=history_start,
+            end_date=today,
+        )
+        checkin_map = self._build_day_slot_checkin_map(checkins)
+        day_off_exact, day_off_weekdays = await self.habit_service.get_day_off_snapshot(
+            user_id=user_id,
+            start_date=history_start,
+            end_date=today,
+        )
+
+        results: list[HabitProgressResult] = []
+        for habit in habits:
+            adherence_days_total = 0
+            weekly_due_days = 0
+            weekly_success_days = 0
+
+            for day in _date_range(history_start, today):
+                if self._is_day_off(day, day_off_exact, day_off_weekdays):
+                    continue
+                due_slots = self._due_slots_for_habit(habit, day)
+                if not due_slots:
+                    continue
+
+                success, _failure = self._day_success(
+                    habit=habit,
+                    day=day,
+                    today=today,
+                    due_slots=due_slots,
+                    checkin_map=checkin_map,
+                )
+                if success:
+                    adherence_days_total += 1
+
+                if period_start <= day <= period_end:
+                    weekly_due_days += 1
+                    if success:
+                        weekly_success_days += 1
+
+            current_streak_days = self._current_streak(
+                habit=habit,
+                history_start=history_start,
+                today=today,
+                day_off_exact=day_off_exact,
+                day_off_weekdays=day_off_weekdays,
+                checkin_map=checkin_map,
+            )
+
+            goal_progress_days = 0
+            goal_reached = False
+            if habit.goal_days is not None and habit.goal_days > 0 and habit.goal_start_date is not None:
+                goal_from = max(habit.goal_start_date, history_start)
+                for day in _date_range(goal_from, today):
+                    if self._is_day_off(day, day_off_exact, day_off_weekdays):
+                        continue
+                    due_slots = self._due_slots_for_habit(habit, day)
+                    if not due_slots:
+                        continue
+                    success, _failure = self._day_success(
+                        habit=habit,
+                        day=day,
+                        today=today,
+                        due_slots=due_slots,
+                        checkin_map=checkin_map,
+                    )
+                    if success:
+                        goal_progress_days += 1
+                goal_reached = goal_progress_days >= habit.goal_days
+
+            results.append(
+                HabitProgressResult(
+                    habit_id=habit.id,
+                    name=habit.name,
+                    icon_emoji=habit.icon_emoji,
+                    weekly_success_days=weekly_success_days,
+                    weekly_due_days=weekly_due_days,
+                    adherence_days_total=adherence_days_total,
+                    current_streak_days=current_streak_days,
+                    goal_days=habit.goal_days,
+                    goal_progress_days=goal_progress_days,
+                    goal_completed_cycles=habit.goal_completed_cycles or 0,
+                    goal_reached=goal_reached,
+                )
+            )
+
+        return results
+
+    def _current_streak(
+        self,
+        habit: Habit,
+        history_start: date,
+        today: date,
+        day_off_exact: set[date],
+        day_off_weekdays: set[int],
+        checkin_map: dict[tuple[int, date, str], HabitCheckin],
+    ) -> int:
+        streak = 0
+        cursor = today
+        while cursor >= history_start:
+            if self._is_day_off(cursor, day_off_exact, day_off_weekdays):
+                cursor -= timedelta(days=1)
+                continue
+            due_slots = self._due_slots_for_habit(habit, cursor)
+            if not due_slots:
+                cursor -= timedelta(days=1)
+                continue
+
+            success, explicit_failure = self._day_success(
+                habit=habit,
+                day=cursor,
+                today=today,
+                due_slots=due_slots,
+                checkin_map=checkin_map,
+            )
+            if success:
+                streak += 1
+                cursor -= timedelta(days=1)
+                continue
+
+            if cursor == today and not explicit_failure:
+                cursor -= timedelta(days=1)
+                continue
+            break
+
+        return streak
+
+    @staticmethod
+    def _due_slots_for_habit(habit: Habit, target_date: date) -> set[TimeSlot]:
+        return {
+            rule.time_slot
+            for rule in habit.schedule_rules
+            if is_rule_due(rule, target_date=target_date, slot=None)
+        }
+
+    @classmethod
+    def _day_success(
+        cls,
+        habit: Habit,
+        day: date,
+        today: date,
+        due_slots: set[TimeSlot],
+        checkin_map: dict[tuple[int, date, str], HabitCheckin],
+    ) -> tuple[bool, bool]:
+        all_success = True
+        explicit_failure = False
+        for slot in due_slots:
+            checkin = checkin_map.get((habit.id, day, slot.value))
+            if checkin is not None and checkin.status in {CheckinStatus.MISSED, CheckinStatus.VIOLATED}:
+                explicit_failure = True
+            if not cls._is_mandatory_success(habit, checkin, target_date=day, today=today):
+                all_success = False
+        return all_success, explicit_failure
+
+    @staticmethod
+    def _is_day_off(target_date: date, exact_days: set[date], weekdays: set[int]) -> bool:
+        if target_date in exact_days:
+            return True
+        return target_date.weekday() in weekdays
+
     @staticmethod
     def _build_checkin_map(checkins: list[HabitCheckin]) -> dict[tuple[int, str], HabitCheckin]:
         return {(checkin.habit_id, checkin.time_slot.value): checkin for checkin in checkins}
+
+    @staticmethod
+    def _build_day_slot_checkin_map(
+        checkins: list[HabitCheckin],
+    ) -> dict[tuple[int, date, str], HabitCheckin]:
+        return {(checkin.habit_id, checkin.check_date, checkin.time_slot.value): checkin for checkin in checkins}
 
     @staticmethod
     def _is_extra_success(habit: Habit, checkin: HabitCheckin | None) -> bool:

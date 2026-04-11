@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +31,9 @@ class HabitService:
             sport_linear_step_reps=payload.sport_linear_step_reps,
             sport_progression_enabled=payload.sport_progression_enabled,
             sport_start_date=payload.sport_start_date,
+            goal_days=payload.goal_days,
+            goal_start_date=payload.goal_start_date,
+            goal_completed_cycles=payload.goal_completed_cycles,
             habit_type=payload.habit_type,
         )
         self.session.add(habit)
@@ -131,6 +134,25 @@ class HabitService:
         )
         rules = list(await self.session.scalars(query))
         return {rule.exact_date for rule in rules if rule.exact_date is not None}
+
+    async def get_day_off_snapshot(
+        self, user_id: int, start_date: date, end_date: date
+    ) -> tuple[set[date], set[int]]:
+        query = select(DayOffRule).where(
+            DayOffRule.user_id == user_id,
+            or_(
+                DayOffRule.weekday.is_not(None),
+                and_(
+                    DayOffRule.exact_date.is_not(None),
+                    DayOffRule.exact_date >= start_date,
+                    DayOffRule.exact_date <= end_date,
+                ),
+            ),
+        )
+        rules = list(await self.session.scalars(query))
+        exact_dates = {rule.exact_date for rule in rules if rule.exact_date is not None}
+        weekdays = {rule.weekday for rule in rules if rule.weekday is not None}
+        return exact_dates, weekdays
 
     async def upsert_checkin(self, user_id: int, payload: CheckinInput) -> HabitCheckin:
         habit = await self.session.scalar(
