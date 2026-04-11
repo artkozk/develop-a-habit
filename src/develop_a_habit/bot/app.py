@@ -6,6 +6,7 @@ from develop_a_habit.handlers.diary import router as diary_router
 from develop_a_habit.handlers.export import router as export_router
 from develop_a_habit.handlers.habits import router as habits_router
 from develop_a_habit.handlers.search_notes import router as search_notes_router
+from develop_a_habit.handlers.settings import router as settings_router
 from develop_a_habit.handlers.stats import router as stats_router
 
 
@@ -17,5 +18,6 @@ def setup_dispatcher() -> Dispatcher:
     dp.include_router(diary_router)
     dp.include_router(export_router)
     dp.include_router(search_notes_router)
+    dp.include_router(settings_router)
     dp.include_router(stats_router)
     return dp
