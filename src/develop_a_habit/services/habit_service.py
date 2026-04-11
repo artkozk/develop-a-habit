@@ -142,6 +142,24 @@ class HabitService:
         )
         return await self.session.scalar(query)
 
+    async def get_checkin(
+        self, user_id: int, habit_id: int, check_date: date, slot: TimeSlot
+    ) -> HabitCheckin | None:
+        habit = await self.session.scalar(
+            select(Habit).where(and_(Habit.id == habit_id, Habit.user_id == user_id))
+        )
+        if habit is None:
+            return None
+
+        query = select(HabitCheckin).where(
+            and_(
+                HabitCheckin.habit_id == habit_id,
+                HabitCheckin.check_date == check_date,
+                HabitCheckin.time_slot == slot,
+            )
+        )
+        return await self.session.scalar(query)
+
     async def get_checkins_for_date(self, user_id: int, target_date: date) -> list[HabitCheckin]:
         query = (
             select(HabitCheckin)
@@ -167,3 +185,16 @@ class HabitService:
         )
         result = await self.session.scalars(query)
         return list(result)
+
+    async def delete_checkin(self, user_id: int, habit_id: int, check_date: date, slot: TimeSlot) -> bool:
+        checkin = await self.get_checkin(
+            user_id=user_id,
+            habit_id=habit_id,
+            check_date=check_date,
+            slot=slot,
+        )
+        if checkin is None:
+            return False
+        await self.session.delete(checkin)
+        await self.session.commit()
+        return True

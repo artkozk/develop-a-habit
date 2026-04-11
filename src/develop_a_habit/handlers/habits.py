@@ -8,11 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from develop_a_habit.config import get_settings
-from develop_a_habit.db.models import Habit, HabitType, ScheduleType, TimeSlot
+from develop_a_habit.db.models import CheckinStatus, Habit, HabitType, ScheduleType, TimeSlot
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.states import HabitStates
-from develop_a_habit.services import HabitCreateInput, ScheduleRuleInput, build_services
+from develop_a_habit.services import CheckinInput, HabitCreateInput, ScheduleRuleInput, build_services
 
 router = Router(name="habits")
 
@@ -32,10 +32,15 @@ WEEKDAY_LABELS = {
     6: "Вс",
 }
 
+LAST_CHECKIN_SNAPSHOT: dict[int, dict[str, str | int | None]] = {}
+
 
 def _slot_button(slot: TimeSlot, selected_slot: str) -> InlineKeyboardButton:
     marker = "•" if selected_slot == slot.value else ""
-    return InlineKeyboardButton(text=f"{SLOT_LABELS[slot]} {marker}".strip(), callback_data=f"habits:menu:{slot.value}")
+    return InlineKeyboardButton(
+        text=f"{SLOT_LABELS[slot]} {marker}".strip(),
+        callback_data=f"habits:menu:{slot.value}",
+    )
 
 
 def _menu_keyboard(habits: list[Habit], selected_slot: str) -> InlineKeyboardMarkup:
@@ -49,13 +54,29 @@ def _menu_keyboard(habits: list[Habit], selected_slot: str) -> InlineKeyboardMar
     ]
 
     for habit in habits:
+        icon = "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
         rows.append(
             [
-                InlineKeyboardButton(text=f"✏️ {habit.name}", callback_data=f"habits:edit:{habit.id}"),
+                InlineKeyboardButton(text=f"{icon} {habit.name}", callback_data=f"habits:edit:{habit.id}"),
                 InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}"),
             ]
         )
 
+        if selected_slot != "all":
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text="✅ Выполнено",
+                        callback_data=f"habits:checkin:{habit.id}:{selected_slot}:done",
+                    ),
+                    InlineKeyboardButton(
+                        text="❌ Не выполнено",
+                        callback_data=f"habits:checkin:{habit.id}:{selected_slot}:fail",
+                    ),
+                ]
+            )
+
+    rows.append([InlineKeyboardButton(text="↩️ Отмена последней отметки", callback_data="habits:undo")])
     rows.append([InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -120,6 +141,8 @@ def _resolve_selected_slot(value: str | None) -> str:
 
 async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, selected_slot: str) -> None:
     settings = get_settings()
+    selected_slot = _resolve_selected_slot(selected_slot)
+
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         user = await services.user_service.get_or_create_by_telegram_id(
@@ -150,11 +173,115 @@ async def habits_menu(message: Message) -> None:
     await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot="")
 
 
+@router.message(Command("today"))
+async def today_menu(message: Message) -> None:
+    current_slot = resolve_slot_by_hour(datetime.now()).value
+    await _render_menu(message, telegram_user_id=message.from_user.id, selected_slot=current_slot)
+
+
 @router.callback_query(F.data.startswith("habits:menu"))
 async def habits_menu_slot(callback: CallbackQuery) -> None:
     parts = callback.data.split(":")
     selected_slot = _resolve_selected_slot(parts[2] if len(parts) > 2 else None)
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=selected_slot)
+
+
+@router.callback_query(F.data.startswith("habits:checkin:"))
+async def checkin_habit(callback: CallbackQuery) -> None:
+    _, _, _, habit_id_value, slot_value, action = callback.data.split(":")
+    habit_id = int(habit_id_value)
+    slot = TimeSlot(slot_value)
+    today = date.today()
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        if habit is None:
+            await callback.answer("Привычка не найдена", show_alert=True)
+            return
+
+        previous = await services.habit_service.get_checkin(
+            user_id=user.id,
+            habit_id=habit_id,
+            check_date=today,
+            slot=slot,
+        )
+        previous_status = previous.status.value if previous is not None else None
+
+        if action == "done":
+            new_status = CheckinStatus.DONE
+        else:
+            new_status = CheckinStatus.MISSED
+            if habit.habit_type == HabitType.NEGATIVE:
+                new_status = CheckinStatus.VIOLATED
+
+        await services.habit_service.upsert_checkin(
+            user_id=user.id,
+            payload=CheckinInput(
+                habit_id=habit_id,
+                check_date=today,
+                time_slot=slot,
+                status=new_status.value,
+            ),
+        )
+
+        LAST_CHECKIN_SNAPSHOT[callback.from_user.id] = {
+            "habit_id": habit_id,
+            "slot": slot.value,
+            "check_date": today.isoformat(),
+            "previous_status": previous_status,
+        }
+
+    await callback.answer("Отметка сохранена")
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
+
+
+@router.callback_query(F.data == "habits:undo")
+async def undo_last_checkin(callback: CallbackQuery) -> None:
+    snapshot = LAST_CHECKIN_SNAPSHOT.get(callback.from_user.id)
+    if snapshot is None:
+        await callback.answer("Нет действий для отката", show_alert=True)
+        return
+
+    habit_id = int(snapshot["habit_id"])
+    slot = TimeSlot(str(snapshot["slot"]))
+    target_date = date.fromisoformat(str(snapshot["check_date"]))
+    previous_status = snapshot["previous_status"]
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+
+        if previous_status is None:
+            await services.habit_service.delete_checkin(
+                user_id=user.id,
+                habit_id=habit_id,
+                check_date=target_date,
+                slot=slot,
+            )
+        else:
+            await services.habit_service.upsert_checkin(
+                user_id=user.id,
+                payload=CheckinInput(
+                    habit_id=habit_id,
+                    check_date=target_date,
+                    time_slot=slot,
+                    status=str(previous_status),
+                ),
+            )
+
+    LAST_CHECKIN_SNAPSHOT.pop(callback.from_user.id, None)
+    await callback.answer("Последняя отметка отменена")
+    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
 
 
 @router.callback_query(F.data == "habits:add")
@@ -319,9 +446,7 @@ async def rename_habit_finish(message: Message, state: FSMContext) -> None:
 
     async with AsyncSessionFactory() as session:
         user_id = await _resolve_user_id(session, message.from_user.id)
-        habit = await session.scalar(
-            select(Habit).where(Habit.id == habit_id, Habit.user_id == user_id)
-        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user_id))
         if habit is None:
             await message.answer("Привычка не найдена.")
             await state.clear()
