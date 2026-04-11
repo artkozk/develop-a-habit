@@ -18,6 +18,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from develop_a_habit.db.base import Base
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    return [item.value for item in enum_cls]
+
+
 class HabitType(str, enum.Enum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
@@ -72,7 +76,9 @@ class Habit(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(256))
-    habit_type: Mapped[HabitType] = mapped_column(Enum(HabitType, name="habit_type"))
+    habit_type: Mapped[HabitType] = mapped_column(
+        Enum(HabitType, name="habit_type", values_callable=_enum_values)
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
@@ -90,8 +96,12 @@ class HabitScheduleRule(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     habit_id: Mapped[int] = mapped_column(ForeignKey("habits.id", ondelete="CASCADE"), index=True)
-    schedule_type: Mapped[ScheduleType] = mapped_column(Enum(ScheduleType, name="schedule_type"))
-    time_slot: Mapped[TimeSlot] = mapped_column(Enum(TimeSlot, name="time_slot"), index=True)
+    schedule_type: Mapped[ScheduleType] = mapped_column(
+        Enum(ScheduleType, name="schedule_type", values_callable=_enum_values)
+    )
+    time_slot: Mapped[TimeSlot] = mapped_column(
+        Enum(TimeSlot, name="time_slot", values_callable=_enum_values), index=True
+    )
     weekday: Mapped[int | None] = mapped_column(Integer, nullable=True)
     interval_days: Mapped[int] = mapped_column(Integer, default=1)
     start_from: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -119,8 +129,12 @@ class HabitCheckin(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     habit_id: Mapped[int] = mapped_column(ForeignKey("habits.id", ondelete="CASCADE"), index=True)
     check_date: Mapped[date] = mapped_column(Date, index=True)
-    time_slot: Mapped[TimeSlot] = mapped_column(Enum(TimeSlot, name="time_slot"), index=True)
-    status: Mapped[CheckinStatus] = mapped_column(Enum(CheckinStatus, name="checkin_status"))
+    time_slot: Mapped[TimeSlot] = mapped_column(
+        Enum(TimeSlot, name="time_slot", values_callable=_enum_values), index=True
+    )
+    status: Mapped[CheckinStatus] = mapped_column(
+        Enum(CheckinStatus, name="checkin_status", values_callable=_enum_values)
+    )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
@@ -133,7 +147,9 @@ class DiaryEntry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     entry_date: Mapped[date] = mapped_column(Date, index=True)
-    entry_type: Mapped[DiaryEntryType] = mapped_column(Enum(DiaryEntryType, name="diary_entry_type"))
+    entry_type: Mapped[DiaryEntryType] = mapped_column(
+        Enum(DiaryEntryType, name="diary_entry_type", values_callable=_enum_values)
+    )
     text_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
