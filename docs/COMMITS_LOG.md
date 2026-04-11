@@ -171,3 +171,19 @@
 - Почему: устранить перегрузку интерфейса, добавить навигацию назад и снизить задержки нажатий.
 - Подсистемы: handlers UX/navigation, calendar performance, callback flow.
 - Риск: средний.
+
+### 4f2ddc1
+- Дата: 2026-04-11
+- Сообщение: `docs: append navigation and callback performance updates`
+- Что сделано: append-only спецификации дополнены фиксацией изменений по подменю, кнопке `Назад`, button-only экспорту и ускорению callback/календаря.
+- Почему: зафиксировать обновленные UX-контракты и инварианты поведения бота.
+- Подсистемы: documentation (product/ai specs).
+- Риск: низкий.
+
+### 4e8c5b9
+- Дата: 2026-04-11
+- Сообщение: `fix: migrate telegram ids to bigint and remove command filters`
+- Что сделано: `users.telegram_user_id` переведен на `BIGINT` (модель + миграции), добавлена миграция `0005`, удален command-фильтр старта в пользу кнопочного входа через текст.
+- Почему: устранить переполнение `INTEGER` и связанные падения/задержки при нажатии кнопок; довести интерфейс до режима без command-хендлеров.
+- Подсистемы: database schema/migrations, handlers/common, startup UX.
+- Риск: средний (изменение схемы users).
