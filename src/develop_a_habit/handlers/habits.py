@@ -101,6 +101,11 @@ def _habit_emoji(habit: Habit) -> str:
     return habit.icon_emoji or ""
 
 
+def _strike_text(value: str) -> str:
+    # Telegram inline button text has no rich text formatting, so we emulate strikethrough.
+    return "".join(f"{char}\u0336" if char != " " else " " for char in value)
+
+
 def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
     if view_mode == "all":
         return InlineKeyboardButton(text="↩️ Текущий период", callback_data="habits:menu:auto")
@@ -124,8 +129,11 @@ def _menu_keyboard(
         )
         status = checkin_map.get((habit.id, action_slot.value))
         marker = _status_marker(status, habit.habit_type)
+        name = habit.name
+        if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
+            name = _strike_text(name)
         icon = _habit_emoji(habit)
-        item_text = f"{marker} {habit.name}" if not icon else f"{marker} {icon} {habit.name}"
+        item_text = f"{marker} {name}" if not icon else f"{marker} {icon} {name}"
         sport_target = compute_linear_target(habit, target_date=target_date)
         if sport_target is not None:
             sets, reps = sport_target
