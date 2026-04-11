@@ -102,8 +102,9 @@ def _habit_emoji(habit: Habit) -> str:
 
 
 def _strike_text(value: str) -> str:
-    # Telegram inline button text has no rich text formatting, so we emulate strikethrough.
-    return "".join(f"{char}\u0336" if char != " " else " " for char in value)
+    # Telegram inline button text has no rich text formatting.
+    # Use diagonal slash overlay so completed text is clearly crossed out in most fonts.
+    return "".join(f"{char}\u0338" if char != " " else " " for char in value)
 
 
 def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
