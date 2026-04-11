@@ -104,3 +104,4 @@
 - Изменено на: добавлен callback namespace `main:open:*` для inline-навигации между разделами. Причина: главный интерфейс должен быть inline-first. Коммит: abc0c6f.
 - Изменено на: в `0001_base_habits` enum-объекты переведены на `create_type=False` при ручном `create(checkfirst=True)`. Причина: устранение `DuplicateObject` на `alembic upgrade head`. Коммит: 0cf872d.
 - Изменено на: в миграции `0001_base_habits` enum-объекты заменены на `sqlalchemy.dialects.postgresql.ENUM(..., create_type=False)`. Причина: `sa.Enum` продолжал создавать типы при `CREATE TABLE`. Коммит: 3681110.
+- Изменено на: `0002_diary_entries` использует PostgreSQL-тип enum c отключенным автосозданием на `CREATE TABLE`. Причина: предотвращение `DuplicateObject` для `diary_entry_type`. Коммит: cd11194.

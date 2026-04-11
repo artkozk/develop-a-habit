@@ -155,3 +155,11 @@
 - Почему: устранение повторного `CREATE TYPE` во время создания таблиц.
 - Подсистемы: database migrations.
 - Риск: низкий.
+
+### cd11194
+- Дата: 2026-04-11
+- Сообщение: `fix: use postgresql enum type in diary entries migration`
+- Что сделано: исправлена вторая миграция для корректной работы PostgreSQL enum `diary_entry_type`.
+- Почему: миграции падали из-за дублирования enum-типа.
+- Подсистемы: database migrations.
+- Риск: низкий.
