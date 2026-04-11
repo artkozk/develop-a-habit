@@ -9,6 +9,7 @@ from develop_a_habit.db.models import CheckinStatus, TimeSlot
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="calendar")
 
@@ -132,7 +133,7 @@ async def _render_calendar(target: Message | CallbackQuery, telegram_user_id: in
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
     else:
-        await target.message.edit_text(text, reply_markup=keyboard)
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("calendar:shift:"))

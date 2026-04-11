@@ -9,7 +9,8 @@ from develop_a_habit.config import get_settings
 from develop_a_habit.db.models import WeeklyPrompt
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.handlers.states import WeeklyStates
-from develop_a_habit.services import build_services, create_transcription_service
+from develop_a_habit.jobs.transcription_queue import enqueue_transcription
+from develop_a_habit.services import build_services
 
 router = Router(name="weekly")
 
@@ -89,9 +90,6 @@ async def weekly_comment_voice(message: Message, state: FSMContext) -> None:
     user_id = await _resolve_user_id(message.from_user.id)
     voice = message.voice
 
-    settings = get_settings()
-    transcription_service = create_transcription_service(settings)
-
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         entry = await services.diary_service.create_voice_entry(
@@ -103,46 +101,11 @@ async def weekly_comment_voice(message: Message, state: FSMContext) -> None:
             mime=voice.mime_type,
             message_id=message.message_id,
         )
-
-        attempts = 0
-        last_error = None
-        transcript_text = None
-        language = None
-        confidence = None
-        status = "pending"
-
-        for attempt in range(1, 4):
-            attempts = attempt
-            try:
-                result = await transcription_service.transcribe_telegram_voice(
-                    bot=message.bot,
-                    telegram_file_id=voice.file_id,
-                )
-                transcript_text = result.text
-                language = result.language
-                confidence = result.confidence
-                status = "done"
-                last_error = None
-                break
-            except Exception as exc:  # pragma: no cover - external branch
-                last_error = str(exc)
-
-        if status != "done":
-            status = "failed"
-
-        await services.diary_service.save_transcript(
-            entry_id=entry.id,
-            transcript_text=transcript_text,
-            status=status,
-            attempts=attempts,
-            language=language,
-            confidence=confidence,
-            last_error=last_error,
-        )
+    await enqueue_transcription(entry_id=entry.id, telegram_file_id=voice.file_id)
 
     await _mark_weekly_prompt_commented(user_id=user_id, week_start=week_start)
     await state.clear()
-    await message.answer("Голосовой комментарий недели сохранен ✅")
+    await message.answer("Голосовой комментарий недели сохранен ✅ Транскрибация в очереди.")
 
 
 @router.message(WeeklyStates.waiting_weekly_comment)

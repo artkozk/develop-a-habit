@@ -11,6 +11,7 @@ from develop_a_habit.handlers.habits import show_habits_manage_menu
 from develop_a_habit.handlers.search_notes import show_search_menu
 from develop_a_habit.handlers.stats import _render_stats
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="settings")
 
@@ -178,7 +179,7 @@ async def _render_dayoff_view(
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
     else:
-        await target.message.edit_text(text, reply_markup=keyboard)
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
 async def show_settings_menu(message: Message) -> None:
@@ -193,7 +194,8 @@ async def settings_noop(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "settings:menu")
 async def settings_menu(callback: CallbackQuery) -> None:
     await callback.answer()
-    await callback.message.edit_text(
+    await safe_edit_text(
+        callback.message,
         "Настройки и дополнительные разделы:",
         reply_markup=_settings_menu_keyboard(),
     )

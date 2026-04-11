@@ -8,7 +8,8 @@ from develop_a_habit.config import get_settings
 from develop_a_habit.db.models import DiaryEntryType
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.handlers.states import DiaryStates
-from develop_a_habit.services import build_services, create_transcription_service
+from develop_a_habit.jobs.transcription_queue import enqueue_transcription
+from develop_a_habit.services import build_services
 
 router = Router(name="diary")
 
@@ -78,9 +79,6 @@ async def diary_add_voice_finish(message: Message, state: FSMContext) -> None:
     voice = message.voice
     user_id = await _resolve_user_id(message.from_user.id)
 
-    settings = get_settings()
-    transcription_service = create_transcription_service(settings)
-
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         entry = await services.diary_service.create_voice_entry(
@@ -92,51 +90,13 @@ async def diary_add_voice_finish(message: Message, state: FSMContext) -> None:
             mime=voice.mime_type,
             message_id=message.message_id,
         )
-
-        attempts = 0
-        last_error = None
-        transcript_text = None
-        language = None
-        confidence = None
-        status = "pending"
-
-        for attempt in range(1, 4):
-            attempts = attempt
-            try:
-                result = await transcription_service.transcribe_telegram_voice(
-                    bot=message.bot,
-                    telegram_file_id=voice.file_id,
-                )
-                transcript_text = result.text
-                language = result.language
-                confidence = result.confidence
-                status = "done"
-                last_error = None
-                break
-            except Exception as exc:  # pragma: no cover - external branch
-                last_error = str(exc)
-
-        if status != "done":
-            status = "failed"
-
-        await services.diary_service.save_transcript(
-            entry_id=entry.id,
-            transcript_text=transcript_text,
-            status=status,
-            attempts=attempts,
-            language=language,
-            confidence=confidence,
-            last_error=last_error,
-        )
+    await enqueue_transcription(entry_id=entry.id, telegram_file_id=voice.file_id)
 
     await state.clear()
-    if status == "done":
-        await message.answer("Голосовая запись и транскрипция сохранены ✅", reply_markup=_diary_menu_keyboard())
-    else:
-        await message.answer(
-            "Голосовая запись сохранена, транскрибация пока не удалась. Можно повторить позже.",
-            reply_markup=_diary_menu_keyboard(),
-        )
+    await message.answer(
+        "Голосовая запись сохранена ✅ Транскрибация добавлена в очередь и появится чуть позже.",
+        reply_markup=_diary_menu_keyboard(),
+    )
 
 
 @router.message(DiaryStates.waiting_diary_voice)

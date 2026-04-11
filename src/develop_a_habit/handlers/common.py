@@ -8,6 +8,7 @@ from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.diary import show_diary_menu
 from develop_a_habit.handlers.habits import _render_menu
 from develop_a_habit.handlers.settings import show_settings_menu
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="common")
 
@@ -41,7 +42,7 @@ async def open_menu_from_text(message: Message) -> None:
 @router.callback_query(F.data == "main:menu")
 async def main_menu_back(callback: CallbackQuery) -> None:
     await callback.answer()
-    await callback.message.edit_text("Главное меню", reply_markup=main_menu_keyboard())
+    await safe_edit_text(callback.message, "Главное меню", reply_markup=main_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("main:open:"))

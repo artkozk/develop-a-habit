@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from develop_a_habit.config import get_settings
 from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="stats")
 
@@ -77,7 +78,7 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
     else:
-        await target.message.edit_text(text, reply_markup=keyboard)
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("stats:period:"))

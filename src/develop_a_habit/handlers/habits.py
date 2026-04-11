@@ -13,6 +13,7 @@ from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.states import HabitStates
 from develop_a_habit.services import CheckinInput, HabitCreateInput, ScheduleRuleInput, build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_reply_markup, safe_edit_text
 
 router = Router(name="habits")
 
@@ -267,7 +268,7 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
     else:
-        await target.message.edit_text(text, reply_markup=keyboard)
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
 async def show_habits_manage_menu(target: Message | CallbackQuery, telegram_user_id: int) -> None:
@@ -285,7 +286,7 @@ async def show_habits_manage_menu(target: Message | CallbackQuery, telegram_user
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
     else:
-        await target.message.edit_text(text, reply_markup=keyboard)
+        await safe_edit_text(target.message, text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "habits:manage")
@@ -393,7 +394,11 @@ async def checkin_habit_legacy(callback: CallbackQuery) -> None:
 async def add_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.clear()
-    await callback.message.edit_text("Шаг 1/5. Выберите тип привычки:", reply_markup=_create_type_keyboard())
+    await safe_edit_text(
+        callback.message,
+        "Шаг 1/5. Выберите тип привычки:",
+        reply_markup=_create_type_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:add:type:"))
@@ -401,7 +406,11 @@ async def add_habit_type(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     habit_type = callback.data.split(":")[-1]
     await state.update_data(habit_type=habit_type)
-    await callback.message.edit_text("Шаг 2/5. Выберите слот времени:", reply_markup=_create_slot_keyboard())
+    await safe_edit_text(
+        callback.message,
+        "Шаг 2/5. Выберите слот времени:",
+        reply_markup=_create_slot_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:add:slot:"))
@@ -409,7 +418,11 @@ async def add_habit_slot(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     slot = callback.data.split(":")[-1]
     await state.update_data(slot=slot)
-    await callback.message.edit_text("Шаг 3/5. Выберите расписание:", reply_markup=_create_schedule_keyboard())
+    await safe_edit_text(
+        callback.message,
+        "Шаг 3/5. Выберите расписание:",
+        reply_markup=_create_schedule_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("habits:add:schedule:"))
@@ -420,13 +433,14 @@ async def add_habit_schedule(callback: CallbackQuery, state: FSMContext) -> None
 
     if schedule == "specific_weekdays":
         await state.update_data(weekdays=[])
-        await callback.message.edit_text(
+        await safe_edit_text(
+            callback.message,
             "Шаг 4/5. Выберите дни недели:",
             reply_markup=_weekday_keyboard(set()),
         )
     else:
         await state.set_state(HabitStates.waiting_name)
-        await callback.message.edit_text("Шаг 4/5. Отправьте название привычки текстом.")
+        await safe_edit_text(callback.message, "Шаг 4/5. Отправьте название привычки текстом.")
 
 
 @router.callback_query(F.data.startswith("habits:add:weekday:"))
@@ -442,7 +456,7 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
             return
         await state.update_data(weekdays=sorted(selected))
         await state.set_state(HabitStates.waiting_name)
-        await callback.message.edit_text("Шаг 4/5. Отправьте название привычки текстом.")
+        await safe_edit_text(callback.message, "Шаг 4/5. Отправьте название привычки текстом.")
         return
 
     weekday = int(part)
@@ -452,7 +466,7 @@ async def add_habit_weekdays(callback: CallbackQuery, state: FSMContext) -> None
         selected.add(weekday)
 
     await state.update_data(weekdays=sorted(selected))
-    await callback.message.edit_reply_markup(reply_markup=_weekday_keyboard(selected))
+    await safe_edit_reply_markup(callback.message, reply_markup=_weekday_keyboard(selected))
 
 
 @router.message(HabitStates.waiting_name)
