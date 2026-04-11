@@ -46,7 +46,7 @@ def upgrade() -> None:
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("telegram_user_id", sa.Integer(), nullable=False),
+        sa.Column("telegram_user_id", sa.BigInteger(), nullable=False),
         sa.Column("timezone", sa.String(length=128), nullable=False, server_default="Europe/Moscow"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )

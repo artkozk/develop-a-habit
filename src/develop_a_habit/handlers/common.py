@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
@@ -63,9 +63,9 @@ async def show_main_menu(message: Message, text: str | None = None) -> None:
     )
 
 
-@router.message(CommandStart())
-async def command_start(message: Message) -> None:
-    await show_main_menu(message, text="Привет! Используйте меню кнопками ниже.")
+@router.message(StateFilter(None), F.text)
+async def open_menu_from_text(message: Message) -> None:
+    await show_main_menu(message, text="Главное меню")
 
 
 @router.callback_query(F.data.startswith("main:submenu:"))
