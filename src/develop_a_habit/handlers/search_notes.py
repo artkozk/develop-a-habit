@@ -16,7 +16,7 @@ def _search_menu_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🔎 Все заметки", callback_data="search:mode:all")],
             [InlineKeyboardButton(text="🎤 Только голосовые", callback_data="search:mode:voice")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:more")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")],
         ]
     )
 

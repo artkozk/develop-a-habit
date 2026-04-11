@@ -18,7 +18,7 @@ depends_on = None
 
 
 habit_type = postgresql.ENUM("positive", "negative", name="habit_type", create_type=False)
-time_slot = postgresql.ENUM("morning", "day", "evening", name="time_slot", create_type=False)
+time_slot = postgresql.ENUM("morning", "day", "evening", "all_day", name="time_slot", create_type=False)
 schedule_type = postgresql.ENUM(
     "daily",
     "every_other_day",

@@ -4,8 +4,12 @@ from develop_a_habit.db.models import HabitScheduleRule, ScheduleType, TimeSlot
 
 
 def is_rule_due(rule: HabitScheduleRule, target_date: date, slot: TimeSlot | None = None) -> bool:
-    if slot is not None and rule.time_slot != slot:
-        return False
+    if slot is not None:
+        if slot == TimeSlot.ALL_DAY:
+            if rule.time_slot != TimeSlot.ALL_DAY:
+                return False
+        elif rule.time_slot not in {slot, TimeSlot.ALL_DAY}:
+            return False
 
     if rule.schedule_type == ScheduleType.DAILY:
         return True

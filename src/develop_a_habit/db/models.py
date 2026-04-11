@@ -27,6 +27,7 @@ class TimeSlot(str, enum.Enum):
     MORNING = "morning"
     DAY = "day"
     EVENING = "evening"
+    ALL_DAY = "all_day"
 
 
 class ScheduleType(str, enum.Enum):

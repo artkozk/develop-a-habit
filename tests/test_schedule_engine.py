@@ -37,3 +37,17 @@ def test_specific_weekday_rule_due():
     )
     assert is_rule_due(rule, date(2026, 4, 13), slot=TimeSlot.EVENING)
     assert not is_rule_due(rule, date(2026, 4, 14), slot=TimeSlot.EVENING)
+
+
+def test_all_day_rule_matches_all_day_parts():
+    rule = HabitScheduleRule(
+        habit_id=3,
+        schedule_type=ScheduleType.DAILY,
+        time_slot=TimeSlot.ALL_DAY,
+    )
+    target = date(2026, 4, 13)
+
+    assert is_rule_due(rule, target, slot=TimeSlot.MORNING)
+    assert is_rule_due(rule, target, slot=TimeSlot.DAY)
+    assert is_rule_due(rule, target, slot=TimeSlot.EVENING)
+    assert is_rule_due(rule, target, slot=TimeSlot.ALL_DAY)

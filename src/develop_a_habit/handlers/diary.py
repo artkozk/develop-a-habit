@@ -19,7 +19,7 @@ def _diary_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📝 Добавить запись", callback_data="diary:add_text")],
             [InlineKeyboardButton(text="🎤 Добавить голосовую", callback_data="diary:add_voice")],
             [InlineKeyboardButton(text="📅 Записи за сегодня", callback_data="diary:list:today")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:menu")],
         ]
     )
 

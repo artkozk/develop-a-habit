@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from develop_a_habit.config import get_settings
 from develop_a_habit.db.models import CheckinStatus, Habit, HabitType, ScheduleType, TimeSlot
 from develop_a_habit.db.session import AsyncSessionFactory
+from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.domain.time_slots import resolve_slot_by_hour
 from develop_a_habit.handlers.states import HabitStates
 from develop_a_habit.services import CheckinInput, HabitCreateInput, ScheduleRuleInput, build_services
@@ -19,6 +20,7 @@ SLOT_LABELS = {
     TimeSlot.MORNING: "🌅 Утро",
     TimeSlot.DAY: "☀️ День",
     TimeSlot.EVENING: "🌙 Вечер",
+    TimeSlot.ALL_DAY: "🗓️ Весь день",
 }
 
 WEEKDAY_LABELS = {
@@ -32,6 +34,12 @@ WEEKDAY_LABELS = {
 }
 
 LAST_CHECKIN_SNAPSHOT: dict[int, dict[str, str | int | None]] = {}
+SLOT_ORDER = {
+    TimeSlot.MORNING: 0,
+    TimeSlot.DAY: 1,
+    TimeSlot.EVENING: 2,
+    TimeSlot.ALL_DAY: 3,
+}
 
 
 def _slot_button(slot: TimeSlot, selected_slot: str) -> InlineKeyboardButton:
@@ -42,42 +50,101 @@ def _slot_button(slot: TimeSlot, selected_slot: str) -> InlineKeyboardButton:
     )
 
 
-def _menu_keyboard(habits: list[Habit], selected_slot: str) -> InlineKeyboardMarkup:
+def _habit_due_slots(habit: Habit, target_date: date) -> set[TimeSlot]:
+    return {
+        rule.time_slot
+        for rule in habit.schedule_rules
+        if is_rule_due(rule, target_date=target_date, slot=None)
+    }
+
+
+def _resolve_action_slot_for_habit(habit: Habit, selected_slot: str, target_date: date) -> TimeSlot:
+    due_slots = _habit_due_slots(habit, target_date=target_date)
+    current_slot = resolve_slot_by_hour(datetime.now())
+
+    if selected_slot == "all":
+        if TimeSlot.ALL_DAY in due_slots:
+            return TimeSlot.ALL_DAY
+        if current_slot in due_slots:
+            return current_slot
+        if due_slots:
+            return sorted(due_slots, key=lambda slot: SLOT_ORDER[slot])[0]
+        if habit.schedule_rules:
+            return habit.schedule_rules[0].time_slot
+        return current_slot
+
+    selected = TimeSlot(selected_slot)
+    if selected == TimeSlot.ALL_DAY:
+        return TimeSlot.ALL_DAY
+    if selected in due_slots:
+        return selected
+    if TimeSlot.ALL_DAY in due_slots:
+        return TimeSlot.ALL_DAY
+    return selected
+
+
+def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
+    if status is None:
+        return "▫️"
+    if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
+        return "✅"
+    if habit_type == HabitType.NEGATIVE and status == CheckinStatus.VIOLATED:
+        return "❌"
+    if status == CheckinStatus.MISSED:
+        return "❌"
+    return "▫️"
+
+
+def _menu_keyboard(
+    habits: list[Habit],
+    selected_slot: str,
+    target_date: date,
+    checkin_map: dict[tuple[int, str], CheckinStatus],
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
             _slot_button(TimeSlot.MORNING, selected_slot),
             _slot_button(TimeSlot.DAY, selected_slot),
             _slot_button(TimeSlot.EVENING, selected_slot),
+        ],
+        [
+            _slot_button(TimeSlot.ALL_DAY, selected_slot),
             InlineKeyboardButton(text="📋 Все", callback_data="habits:menu:all"),
-        ]
+        ],
     ]
 
     for habit in habits:
+        action_slot = _resolve_action_slot_for_habit(
+            habit=habit,
+            selected_slot=selected_slot,
+            target_date=target_date,
+        )
+        status = checkin_map.get((habit.id, action_slot.value))
         icon = "✅" if habit.habit_type == HabitType.POSITIVE else "🚫"
+        marker = _status_marker(status, habit.habit_type)
+
         rows.append(
             [
-                InlineKeyboardButton(text=f"{icon} {habit.name}", callback_data=f"habits:edit:{habit.id}"),
+                InlineKeyboardButton(
+                    text=f"{marker} {icon} {habit.name}",
+                    callback_data=f"habits:tap:{habit.id}:{action_slot.value}:{selected_slot}",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="❌",
+                    callback_data=f"habits:fail:{habit.id}:{action_slot.value}:{selected_slot}",
+                ),
+                InlineKeyboardButton(text="✏️", callback_data=f"habits:edit:{habit.id}"),
                 InlineKeyboardButton(text="🗑", callback_data=f"habits:delete:{habit.id}"),
             ]
         )
 
-        if selected_slot != "all":
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text="✅ Выполнено",
-                        callback_data=f"habits:checkin:{habit.id}:{selected_slot}:done",
-                    ),
-                    InlineKeyboardButton(
-                        text="❌ Не выполнено",
-                        callback_data=f"habits:checkin:{habit.id}:{selected_slot}:fail",
-                    ),
-                ]
-            )
-
     rows.append([InlineKeyboardButton(text="↩️ Отмена последней отметки", callback_data="habits:undo")])
     rows.append([InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -99,6 +166,7 @@ def _create_slot_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🌅 Утро", callback_data="habits:add:slot:morning")],
             [InlineKeyboardButton(text="☀️ День", callback_data="habits:add:slot:day")],
             [InlineKeyboardButton(text="🌙 Вечер", callback_data="habits:add:slot:evening")],
+            [InlineKeyboardButton(text="🗓️ Весь день", callback_data="habits:add:slot:all_day")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:menu:all")],
         ]
     )
@@ -137,7 +205,7 @@ def _weekday_keyboard(selected: set[int]) -> InlineKeyboardMarkup:
 
 
 def _resolve_selected_slot(value: str | None) -> str:
-    if value in {"morning", "day", "evening", "all"}:
+    if value in {"morning", "day", "evening", "all_day", "all"}:
         return value
     current_slot = resolve_slot_by_hour(datetime.now())
     return current_slot.value
@@ -160,10 +228,17 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
         else:
             slot = TimeSlot(selected_slot)
             habits = await services.habit_service.list_due_habits(user.id, target_date=target_date, slot=slot)
+        checkins = await services.habit_service.get_checkins_for_date(user_id=user.id, target_date=target_date)
 
-    title_slot = "все привычки" if selected_slot == "all" else f"слот: {selected_slot}"
+    checkin_map = {(item.habit_id, item.time_slot.value): item.status for item in checkins}
+    title_slot = "все привычки" if selected_slot == "all" else f"слот: {SLOT_LABELS[TimeSlot(selected_slot)]}"
     text = f"Привычки на сегодня ({title_slot}).\nВыберите действие:"
-    keyboard = _menu_keyboard(habits, selected_slot)
+    keyboard = _menu_keyboard(
+        habits=habits,
+        selected_slot=selected_slot,
+        target_date=target_date,
+        checkin_map=checkin_map,
+    )
 
     if isinstance(target, Message):
         await target.answer(text, reply_markup=keyboard)
@@ -179,12 +254,14 @@ async def habits_menu_slot(callback: CallbackQuery) -> None:
     await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=selected_slot)
 
 
-@router.callback_query(F.data.startswith("habits:checkin:"))
-async def checkin_habit(callback: CallbackQuery) -> None:
+async def _apply_checkin(
+    callback: CallbackQuery,
+    habit_id: int,
+    slot: TimeSlot,
+    action: str,
+    selected_slot: str,
+) -> None:
     await callback.answer("Сохраняю...")
-    _, _, _, habit_id_value, slot_value, action = callback.data.split(":")
-    habit_id = int(habit_id_value)
-    slot = TimeSlot(slot_value)
     today = date.today()
 
     settings = get_settings()
@@ -231,7 +308,52 @@ async def checkin_habit(callback: CallbackQuery) -> None:
             "previous_status": previous_status,
         }
 
-    await _render_menu(callback, telegram_user_id=callback.from_user.id, selected_slot=slot.value)
+    await _render_menu(
+        callback,
+        telegram_user_id=callback.from_user.id,
+        selected_slot=_resolve_selected_slot(selected_slot),
+    )
+
+
+@router.callback_query(F.data.startswith("habits:tap:"))
+async def checkin_habit_tap(callback: CallbackQuery) -> None:
+    _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
+    await _apply_checkin(
+        callback=callback,
+        habit_id=int(habit_id_value),
+        slot=TimeSlot(slot_value),
+        action="done",
+        selected_slot=selected_slot,
+    )
+
+
+@router.callback_query(F.data.startswith("habits:fail:"))
+async def checkin_habit_fail(callback: CallbackQuery) -> None:
+    _, _, habit_id_value, slot_value, selected_slot = callback.data.split(":")
+    await _apply_checkin(
+        callback=callback,
+        habit_id=int(habit_id_value),
+        slot=TimeSlot(slot_value),
+        action="fail",
+        selected_slot=selected_slot,
+    )
+
+
+@router.callback_query(F.data.startswith("habits:checkin:"))
+async def checkin_habit_legacy(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":")
+    if len(parts) < 5:
+        await callback.answer("Неверный формат", show_alert=True)
+        return
+
+    _, _, habit_id_value, slot_value, action = parts
+    await _apply_checkin(
+        callback=callback,
+        habit_id=int(habit_id_value),
+        slot=TimeSlot(slot_value),
+        action=action,
+        selected_slot=slot_value,
+    )
 
 
 @router.callback_query(F.data == "habits:undo")

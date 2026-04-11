@@ -115,7 +115,7 @@ async def _calendar_keyboard(user_id: int, start: date) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➡️ Неделя", callback_data=f"calendar:shift:{start.isoformat()}:1"),
         ]
     )
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:root")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

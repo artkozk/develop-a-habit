@@ -42,7 +42,7 @@ def _stats_keyboard(period: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=label("Месяц", "month"), callback_data="stats:period:month"),
                 InlineKeyboardButton(text=label("Год", "year"), callback_data="stats:period:year"),
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="main:submenu:analytics")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")],
         ]
     )
 
