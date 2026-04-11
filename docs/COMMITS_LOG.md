@@ -139,3 +139,11 @@
 - Почему: соответствие требованию основного интерфейса на inline-кнопках и управляемых выходных.
 - Подсистемы: bot UX, settings/day-off.
 - Риск: средний.
+
+### 0cf872d
+- Дата: 2026-04-11
+- Сообщение: `fix: prevent duplicate enum creation in base migration`
+- Что сделано: исправлена первая миграция, исключено повторное создание PostgreSQL enum-типов.
+- Почему: на чистом сервере `alembic upgrade head` падал с `DuplicateObject`.
+- Подсистемы: database migrations.
+- Риск: низкий.
