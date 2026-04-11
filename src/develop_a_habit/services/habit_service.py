@@ -29,6 +29,7 @@ class HabitService:
             sport_base_sets=payload.sport_base_sets,
             sport_base_reps=payload.sport_base_reps,
             sport_linear_step_reps=payload.sport_linear_step_reps,
+            sport_progression_enabled=payload.sport_progression_enabled,
             sport_start_date=payload.sport_start_date,
             habit_type=payload.habit_type,
         )
@@ -158,6 +159,7 @@ class HabitService:
                 actual_reps_csv=payload.actual_reps_csv,
                 target_sets=payload.target_sets,
                 target_reps=payload.target_reps,
+                sport_plan_adhered=payload.sport_plan_adhered,
                 note=payload.note,
             )
             self.session.add(checkin)
@@ -167,6 +169,7 @@ class HabitService:
             checkin.actual_reps_csv = payload.actual_reps_csv
             checkin.target_sets = payload.target_sets
             checkin.target_reps = payload.target_reps
+            checkin.sport_plan_adhered = payload.sport_plan_adhered
             checkin.note = payload.note
 
         await self.session.commit()

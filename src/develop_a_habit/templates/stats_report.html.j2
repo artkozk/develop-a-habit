@@ -61,6 +61,8 @@
     <article class="card"><div class="label">Сверх плана</div><div class="value">{{ summary.extra_slots }}</div></article>
     <article class="card"><div class="label">План %</div><div class="value">{{ summary.plan_completion }}%</div></article>
     <article class="card"><div class="label">Итог % (со сверхпланом)</div><div class="value">{{ summary.over_completion }}%</div></article>
+    <article class="card"><div class="label">Подтягивания (повторы)</div><div class="value">{{ summary.pullups_reps }}</div></article>
+    <article class="card"><div class="label">Отжимания (повторы)</div><div class="value">{{ summary.pushups_reps }}</div></article>
   </section>
 
   <section class="card">
@@ -74,6 +76,8 @@
           <th>Сверхплан</th>
           <th>План %</th>
           <th>Итог %</th>
+          <th>Подтягивания</th>
+          <th>Отжимания</th>
         </tr>
       </thead>
       <tbody>
@@ -85,6 +89,8 @@
           <td>{{ row.extra_slots }}</td>
           <td>{{ row.plan_completion }}%</td>
           <td class="{% if row.over_completion >= 100 %}over{% else %}under{% endif %}">{{ row.over_completion }}%</td>
+          <td>{{ row.pullups_reps }}</td>
+          <td>{{ row.pushups_reps }}</td>
         </tr>
         {% endfor %}
       </tbody>

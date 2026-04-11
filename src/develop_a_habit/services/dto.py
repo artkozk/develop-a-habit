@@ -22,6 +22,7 @@ class HabitCreateInput:
     sport_base_sets: int | None = None
     sport_base_reps: int | None = None
     sport_linear_step_reps: int | None = None
+    sport_progression_enabled: bool = True
     sport_start_date: date | None = None
     schedule_rules: list[ScheduleRuleInput] = field(default_factory=list)
 
@@ -36,4 +37,5 @@ class CheckinInput:
     actual_reps_csv: str | None = None
     target_sets: int | None = None
     target_reps: int | None = None
+    sport_plan_adhered: bool | None = None
     note: str | None = None

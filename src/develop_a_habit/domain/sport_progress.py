@@ -8,6 +8,8 @@ def compute_linear_target(habit: Habit, target_date: date) -> tuple[int, int] | 
         return None
     if habit.sport_base_sets is None or habit.sport_base_reps is None:
         return None
+    if not habit.sport_progression_enabled:
+        return habit.sport_base_sets, habit.sport_base_reps
 
     start = habit.sport_start_date or target_date
     step = max(habit.sport_linear_step_reps or 0, 0)

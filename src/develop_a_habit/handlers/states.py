@@ -6,7 +6,8 @@ class HabitStates(StatesGroup):
     waiting_icon = State()
     waiting_sport_target = State()
     waiting_sport_step = State()
-    waiting_sport_result = State()
+    waiting_sport_update_target = State()
+    waiting_sport_update_step = State()
     waiting_rename = State()
 
 

@@ -50,6 +50,8 @@ class StatsReportService:
                     "extra_slots": metrics.extra_slots,
                     "plan_completion": metrics.plan_completion,
                     "over_completion": metrics.over_completion,
+                    "pullups_reps": metrics.pullups_reps,
+                    "pushups_reps": metrics.pushups_reps,
                 }
             )
 
@@ -86,6 +88,8 @@ class StatsReportService:
                 "extra_slots": summary.extra_slots,
                 "plan_completion": summary.plan_completion,
                 "over_completion": summary.over_completion,
+                "pullups_reps": summary.pullups_reps,
+                "pushups_reps": summary.pushups_reps,
             },
             months=months,
             weeks=weeks,

@@ -81,6 +81,7 @@ class Habit(Base):
     sport_base_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sport_base_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sport_linear_step_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sport_progression_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sport_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     habit_type: Mapped[HabitType] = mapped_column(
         Enum(HabitType, name="habit_type", values_callable=_enum_values)
@@ -145,6 +146,7 @@ class HabitCheckin(Base):
     actual_reps_csv: Mapped[str | None] = mapped_column(String(256), nullable=True)
     target_sets: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sport_plan_adhered: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 

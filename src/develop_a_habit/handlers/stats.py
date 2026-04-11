@@ -71,7 +71,9 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
         f"Выполнено: {metrics.completed_slots}\n"
         f"Сверх плана (выходные): {metrics.extra_slots}\n"
         f"Выполнение плана: {metrics.plan_completion}%\n"
-        f"С учетом сверх плана: {metrics.over_completion}%"
+        f"С учетом сверх плана: {metrics.over_completion}%\n\n"
+        f"Подтягивания (повторы): {metrics.pullups_reps}\n"
+        f"Отжимания (повторы): {metrics.pushups_reps}"
     )
 
     keyboard = _stats_keyboard(period)
