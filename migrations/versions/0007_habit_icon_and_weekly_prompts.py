@@ -1,6 +1,6 @@
 """add habit icon emoji and weekly prompts table
 
-Revision ID: 0007_habit_icon_and_weekly_prompts
+Revision ID: 0007_habit_icon_weekly
 Revises: 0006_add_all_day_timeslot
 Create Date: 2026-04-11
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "0007_habit_icon_and_weekly_prompts"
+revision = "0007_habit_icon_weekly"
 down_revision = "0006_add_all_day_timeslot"
 branch_labels = None
 depends_on = None
