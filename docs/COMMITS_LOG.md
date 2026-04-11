@@ -147,3 +147,11 @@
 - Почему: на чистом сервере `alembic upgrade head` падал с `DuplicateObject`.
 - Подсистемы: database migrations.
 - Риск: низкий.
+
+### 3681110
+- Дата: 2026-04-11
+- Сообщение: `fix: use postgresql enum types with create_type disabled in migration`
+- Что сделано: заменен тип enum в первой миграции на PostgreSQL-специфичный `ENUM` с отключенным автосозданием.
+- Почему: устранение повторного `CREATE TYPE` во время создания таблиц.
+- Подсистемы: database migrations.
+- Риск: низкий.

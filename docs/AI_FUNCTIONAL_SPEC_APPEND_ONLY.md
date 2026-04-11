@@ -103,3 +103,4 @@
 - Изменено на: добавлен namespace `settings:*` для выбора/сохранения weekday day-off правил. Причина: управление множественными выходными через UI. Коммит: abc0c6f.
 - Изменено на: добавлен callback namespace `main:open:*` для inline-навигации между разделами. Причина: главный интерфейс должен быть inline-first. Коммит: abc0c6f.
 - Изменено на: в `0001_base_habits` enum-объекты переведены на `create_type=False` при ручном `create(checkfirst=True)`. Причина: устранение `DuplicateObject` на `alembic upgrade head`. Коммит: 0cf872d.
+- Изменено на: в миграции `0001_base_habits` enum-объекты заменены на `sqlalchemy.dialects.postgresql.ENUM(..., create_type=False)`. Причина: `sa.Enum` продолжал создавать типы при `CREATE TABLE`. Коммит: 3681110.
