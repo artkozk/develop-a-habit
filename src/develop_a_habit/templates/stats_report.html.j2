@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Статистика привычек</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --text: #152238;
+      --muted: #5b6b84;
+      --accent: #0f766e;
+      --accent-soft: #b6f0e8;
+      --danger: #b42318;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Noto Sans", sans-serif;
+      background: radial-gradient(circle at top right, #d6f1ff, var(--bg));
+      color: var(--text);
+      padding: 24px;
+    }
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      padding: 16px;
+    }
+    .label { color: var(--muted); font-size: 14px; }
+    .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #e8edf4; text-align: left; }
+    th { color: var(--muted); font-weight: 600; font-size: 14px; }
+    .bar-wrap { display: flex; gap: 8px; align-items: center; }
+    .bar {
+      height: 10px;
+      background: var(--accent-soft);
+      border-radius: 999px;
+      overflow: hidden;
+      width: 160px;
+    }
+    .bar > span { display: block; height: 100%; background: var(--accent); }
+    .over { color: var(--accent); font-weight: 700; }
+    .under { color: var(--danger); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>Статистика привычек за {{ year }}</h1>
+  <p>Пользователь ID: {{ telegram_user_id }}</p>
+
+  <section class="grid">
+    <article class="card"><div class="label">Плановые слоты</div><div class="value">{{ summary.plan_slots }}</div></article>
+    <article class="card"><div class="label">Выполнено</div><div class="value">{{ summary.completed_slots }}</div></article>
+    <article class="card"><div class="label">Сверх плана</div><div class="value">{{ summary.extra_slots }}</div></article>
+    <article class="card"><div class="label">План %</div><div class="value">{{ summary.plan_completion }}%</div></article>
+    <article class="card"><div class="label">Итог % (со сверхпланом)</div><div class="value">{{ summary.over_completion }}%</div></article>
+  </section>
+
+  <section class="card">
+    <h2>Помесячно</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Месяц</th>
+          <th>План</th>
+          <th>Выполнено</th>
+          <th>Сверхплан</th>
+          <th>План %</th>
+          <th>Итог %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in months %}
+        <tr>
+          <td>{{ row.month_name }}</td>
+          <td>{{ row.plan_slots }}</td>
+          <td>{{ row.completed_slots }}</td>
+          <td>{{ row.extra_slots }}</td>
+          <td>{{ row.plan_completion }}%</td>
+          <td class="{% if row.over_completion >= 100 %}over{% else %}under{% endif %}">{{ row.over_completion }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card" style="margin-top: 16px;">
+    <h2>Последние недели</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Неделя</th>
+          <th>Итог %</th>
+          <th>Визуализация</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in weeks %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td>{{ row.over_completion }}%</td>
+          <td>
+            <div class="bar-wrap">
+              <div class="bar"><span style="width: {{ row.bar_width }}%;"></span></div>
+              <span>{{ row.over_completion }}%</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

@@ -16,5 +16,6 @@ async def command_start(message: Message) -> None:
         "/diary — дневник\n"
         "/search_notes — поиск заметок\n"
         "/stats — статистика\n"
-        "/export_diary — экспорт дневника"
+        "/export_diary — экспорт дневника\n"
+        "/export_stats_html — HTML статистика"
     )

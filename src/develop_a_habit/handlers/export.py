@@ -4,7 +4,7 @@ from aiogram.types import FSInputFile, Message
 
 from develop_a_habit.config import get_settings
 from develop_a_habit.db.session import AsyncSessionFactory
-from develop_a_habit.services import ExportService, build_services
+from develop_a_habit.services import ExportService, StatsReportService, build_services
 
 router = Router(name="export")
 
@@ -24,4 +24,25 @@ async def export_diary(message: Message) -> None:
     await message.answer_document(
         FSInputFile(result.archive_path),
         caption=f"Экспорт готов. Записей: {result.entries_count}",
+    )
+
+
+@router.message(Command("export_stats_html"))
+async def export_stats_html(message: Message) -> None:
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=message.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        report_service = StatsReportService(session)
+        result = await report_service.generate_yearly_html(
+            user_id=user.id,
+            telegram_user_id=message.from_user.id,
+        )
+
+    await message.answer_document(
+        FSInputFile(result.file_path),
+        caption="HTML-отчет по статистике готов",
     )
