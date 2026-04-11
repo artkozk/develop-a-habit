@@ -35,11 +35,11 @@ WEEKDAY_LABELS = {
     6: "Вс",
 }
 
-SLOT_ORDER = {
+DISPLAY_SLOT_ORDER = {
     TimeSlot.MORNING: 0,
     TimeSlot.DAY: 1,
-    TimeSlot.EVENING: 2,
-    TimeSlot.ALL_DAY: 3,
+    TimeSlot.ALL_DAY: 2,
+    TimeSlot.EVENING: 3,
 }
 
 
@@ -63,14 +63,11 @@ def _resolve_action_slot_for_habit(habit: Habit, selected_slot: str, target_date
     current_slot = resolve_slot_by_hour(datetime.now())
 
     if selected_slot == "all":
-        if TimeSlot.ALL_DAY in due_slots:
-            return TimeSlot.ALL_DAY
-        if current_slot in due_slots:
-            return current_slot
         if due_slots:
-            return sorted(due_slots, key=lambda slot: SLOT_ORDER[slot])[0]
+            return sorted(due_slots, key=lambda slot: DISPLAY_SLOT_ORDER[slot])[0]
         if habit.schedule_rules:
-            return habit.schedule_rules[0].time_slot
+            schedule_slots = {rule.time_slot for rule in habit.schedule_rules}
+            return sorted(schedule_slots, key=lambda slot: DISPLAY_SLOT_ORDER[slot])[0]
         return current_slot
 
     selected = TimeSlot(selected_slot)
@@ -83,28 +80,50 @@ def _resolve_action_slot_for_habit(habit: Habit, selected_slot: str, target_date
     return selected
 
 
-def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
-    if status is None:
-        if habit_type == HabitType.NEGATIVE:
-            return "✅"
-        return "▫️"
-    if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
-        return "✅"
-    if habit_type == HabitType.NEGATIVE and status == CheckinStatus.VIOLATED:
-        return "❌"
-    if status == CheckinStatus.MISSED:
-        return "❌"
-    return "▫️"
+def _habit_primary_slot_for_sort(habit: Habit) -> TimeSlot:
+    if habit.schedule_rules:
+        schedule_slots = {rule.time_slot for rule in habit.schedule_rules}
+        return sorted(schedule_slots, key=lambda slot: DISPLAY_SLOT_ORDER[slot])[0]
+    return TimeSlot.ALL_DAY
 
 
-def _habit_emoji(habit: Habit) -> str:
-    return habit.icon_emoji or ""
+def _habit_created_sort_key(habit: Habit) -> tuple[datetime, int]:
+    return (habit.created_at or datetime.min, habit.id)
 
 
-def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
-    if view_mode == "all":
-        return InlineKeyboardButton(text="↩️ Текущий период", callback_data="habits:menu:auto")
-    return InlineKeyboardButton(text="📋 Показать все", callback_data="habits:menu:all")
+def _sorted_habits_for_menu(
+    habits: list[Habit],
+    selected_slot: str,
+    target_date: date,
+    checkin_map: dict[tuple[int, str], CheckinStatus],
+) -> list[tuple[Habit, TimeSlot, CheckinStatus | None]]:
+    items: list[tuple[Habit, TimeSlot, CheckinStatus | None]] = []
+    for habit in habits:
+        action_slot = _resolve_action_slot_for_habit(
+            habit=habit,
+            selected_slot=selected_slot,
+            target_date=target_date,
+        )
+        status = checkin_map.get((habit.id, action_slot.value))
+        items.append((habit, action_slot, status))
+
+    items.sort(
+        key=lambda item: (
+            DISPLAY_SLOT_ORDER[item[1]],
+            *_habit_created_sort_key(item[0]),
+        )
+    )
+    return items
+
+
+def _sorted_habits_for_manage(habits: list[Habit]) -> list[Habit]:
+    return sorted(
+        habits,
+        key=lambda habit: (
+            DISPLAY_SLOT_ORDER[_habit_primary_slot_for_sort(habit)],
+            *_habit_created_sort_key(habit),
+        ),
+    )
 
 
 def _menu_keyboard(
@@ -116,13 +135,12 @@ def _menu_keyboard(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [[_view_toggle_button(view_mode)]]
 
-    for habit in habits:
-        action_slot = _resolve_action_slot_for_habit(
-            habit=habit,
-            selected_slot=selected_slot,
-            target_date=target_date,
-        )
-        status = checkin_map.get((habit.id, action_slot.value))
+    for habit, action_slot, status in _sorted_habits_for_menu(
+        habits=habits,
+        selected_slot=selected_slot,
+        target_date=target_date,
+        checkin_map=checkin_map,
+    ):
         marker = _status_marker(status, habit.habit_type)
         name = habit.name
         icon = _habit_emoji(habit)
@@ -149,7 +167,7 @@ def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Добавить привычку", callback_data="habits:add")],
     ]
 
-    for habit in habits:
+    for habit in _sorted_habits_for_manage(habits):
         icon = _habit_emoji(habit)
         habit_text = habit.name if not icon else f"{icon} {habit.name}"
         rows.append(
@@ -181,6 +199,41 @@ def _manage_keyboard(habits: list[Habit]) -> InlineKeyboardMarkup:
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _create_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Позитивная", callback_data="habits:add:type:positive"),
+                InlineKeyboardButton(text="🚫 Негативная", callback_data="habits:add:type:negative"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
+        ]
+    )
+
+def _status_marker(status: CheckinStatus | None, habit_type: HabitType) -> str:
+    if status is None:
+        if habit_type == HabitType.NEGATIVE:
+            return "✅"
+        return "▫️"
+    if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
+        return "✅"
+    if habit_type == HabitType.NEGATIVE and status == CheckinStatus.VIOLATED:
+        return "❌"
+    if status == CheckinStatus.MISSED:
+        return "❌"
+    return "▫️"
+
+
+def _habit_emoji(habit: Habit) -> str:
+    return habit.icon_emoji or ""
+
+
+def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
+    if view_mode == "all":
+        return InlineKeyboardButton(text="↩️ Текущий период", callback_data="habits:menu:auto")
+    return InlineKeyboardButton(text="📋 Показать все", callback_data="habits:menu:all")
 
 
 def _goal_settings_keyboard(habit_id: int, goal_reached: bool) -> InlineKeyboardMarkup:
@@ -245,18 +298,6 @@ def _recommended_sport_preset(habit_name: str) -> tuple[int, int] | None:
     if "отжим" in value:
         return 2, 15
     return None
-
-
-def _create_type_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Позитивная", callback_data="habits:add:type:positive"),
-                InlineKeyboardButton(text="🚫 Негативная", callback_data="habits:add:type:negative"),
-            ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
-        ]
-    )
 
 
 def _create_slot_keyboard() -> InlineKeyboardMarkup:
