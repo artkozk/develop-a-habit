@@ -14,5 +14,6 @@ async def command_start(message: Message) -> None:
         "/habits — управление привычками\n"
         "/calendar — календарь недели\n"
         "/diary — дневник\n"
+        "/search_notes — поиск заметок\n"
         "/stats — статистика"
     )

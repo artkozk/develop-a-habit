@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from develop_a_habit.db.models import DiaryEntry, DiaryEntryType, DiaryTranscript, DiaryVoice
@@ -130,3 +130,49 @@ class DiaryService:
 
     async def get_transcript_by_entry_id(self, entry_id: int) -> DiaryTranscript | None:
         return await self.session.scalar(select(DiaryTranscript).where(DiaryTranscript.entry_id == entry_id))
+
+    async def search_entries(
+        self,
+        user_id: int,
+        query_text: str,
+        voice_only: bool = False,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 20,
+    ) -> list[DiaryEntry]:
+        query = (
+            select(DiaryEntry)
+            .outerjoin(DiaryTranscript, DiaryTranscript.entry_id == DiaryEntry.id)
+            .outerjoin(DiaryVoice, DiaryVoice.entry_id == DiaryEntry.id)
+            .where(DiaryEntry.user_id == user_id)
+        )
+
+        if start_date is not None:
+            query = query.where(DiaryEntry.entry_date >= start_date)
+        if end_date is not None:
+            query = query.where(DiaryEntry.entry_date <= end_date)
+        if voice_only:
+            query = query.where(DiaryVoice.id.is_not(None))
+
+        cleaned = query_text.strip()
+        if cleaned:
+            ts_query = func.plainto_tsquery("russian", cleaned)
+            diary_text_match = func.to_tsvector(
+                "russian", func.coalesce(DiaryEntry.text_body, "")
+            ).op("@@")(ts_query)
+            transcript_match = func.to_tsvector(
+                "russian", func.coalesce(DiaryTranscript.transcript_text, "")
+            ).op("@@")(ts_query)
+            ilike_pattern = f"%{cleaned}%"
+            query = query.where(
+                or_(
+                    diary_text_match,
+                    transcript_match,
+                    DiaryEntry.text_body.ilike(ilike_pattern),
+                    DiaryTranscript.transcript_text.ilike(ilike_pattern),
+                )
+            )
+
+        query = query.order_by(DiaryEntry.entry_date.desc(), DiaryEntry.created_at.desc()).limit(limit)
+        result = await self.session.scalars(query)
+        return list(result)
