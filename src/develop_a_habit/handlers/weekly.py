@@ -11,6 +11,7 @@ from develop_a_habit.db.session import AsyncSessionFactory
 from develop_a_habit.handlers.states import WeeklyStates
 from develop_a_habit.jobs.transcription_queue import enqueue_transcription
 from develop_a_habit.services import build_services
+from develop_a_habit.utils.telegram_safe import safe_edit_text
 
 router = Router(name="weekly")
 
@@ -49,8 +50,12 @@ async def weekly_comment_start(callback: CallbackQuery, state: FSMContext) -> No
     week_start = _decode_day(callback.data.split(":")[-1])
     await state.update_data(weekly_comment_week_start=week_start.isoformat())
     await state.set_state(WeeklyStates.waiting_weekly_comment)
-    await callback.message.answer(
-        f"Отправьте текст или голосовой комментарий по неделе, начиная с {week_start.strftime('%d.%m.%Y')}."
+    await safe_edit_text(
+        callback.message,
+        (
+            f"Отправьте текст или голосовой комментарий по неделе, начиная с "
+            f"{week_start.strftime('%d.%m.%Y')}."
+        ),
     )
 
 

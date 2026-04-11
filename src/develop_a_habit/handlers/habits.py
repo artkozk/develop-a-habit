@@ -540,7 +540,11 @@ def _build_rules_from_state(data: dict) -> tuple[list[ScheduleRuleInput], TimeSl
     return rules, slot
 
 
-async def _save_new_habit_from_state(message: Message, state: FSMContext) -> None:
+async def _save_new_habit_from_state(
+    target: Message | CallbackQuery,
+    state: FSMContext,
+    telegram_user_id: int,
+) -> None:
     data = await state.get_data()
     rules, _slot = _build_rules_from_state(data)
     payload = HabitCreateInput(
@@ -560,14 +564,18 @@ async def _save_new_habit_from_state(message: Message, state: FSMContext) -> Non
     async with AsyncSessionFactory() as session:
         services = build_services(session)
         user = await services.user_service.get_or_create_by_telegram_id(
-            telegram_user_id=message.from_user.id,
+            telegram_user_id=telegram_user_id,
             timezone=settings.timezone_default,
         )
         await services.habit_service.create_habit(user.id, payload)
 
     await state.clear()
-    await message.answer("Привычка добавлена ✅")
-    await show_habits_manage_menu(message, telegram_user_id=message.from_user.id)
+    if isinstance(target, CallbackQuery):
+        await target.answer("Привычка добавлена ✅")
+        await show_habits_manage_menu(target, telegram_user_id=telegram_user_id)
+    else:
+        await target.answer("Привычка добавлена ✅")
+        await show_habits_manage_menu(target, telegram_user_id=telegram_user_id)
 
 
 @router.callback_query(F.data == "habits:manage")
@@ -1132,7 +1140,11 @@ async def add_habit_sport_type(callback: CallbackQuery, state: FSMContext) -> No
         sport_linear_step_reps=None,
         sport_progression_enabled=False,
     )
-    await _save_new_habit_from_state(callback.message, state)
+    await _save_new_habit_from_state(
+        callback,
+        state,
+        telegram_user_id=callback.from_user.id,
+    )
 
 
 @router.message(HabitStates.waiting_sport_target)
@@ -1171,7 +1183,11 @@ async def add_habit_sport_step(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(sport_linear_step_reps=step, is_sport=True)
-    await _save_new_habit_from_state(message, state)
+    await _save_new_habit_from_state(
+        message,
+        state,
+        telegram_user_id=message.from_user.id,
+    )
 
 
 @router.message(HabitStates.waiting_sport_update_target)
