@@ -195,3 +195,19 @@
 - Почему: уменьшить перегрузку интерфейса, ускорить ежедневные отметки и устранить падение при нажатиях.
 - Подсистемы: handlers UX/navigation, habits checkin flow, schedule engine, migrations/time_slot enum.
 - Риск: средний (изменение callback-контрактов и enum time_slot).
+
+### 2b02c5d
+- Дата: 2026-04-11
+- Сообщение: `docs: append menu consolidation and all-day habit behavior`
+- Что сделано: append-only спецификации и журнал коммитов дополнены правилами по новой структуре меню, слоту `all_day` и one-tap отметкам привычек.
+- Почему: зафиксировать новые UX-контракты и не потерять функциональные изменения.
+- Подсистемы: documentation (product/ai specs, commits log).
+- Риск: низкий.
+
+### 8f01757
+- Дата: 2026-04-11
+- Сообщение: `fix: persist enum values to match postgres enum literals`
+- Что сделано: в ORM-моделях enum-колонки переведены на сохранение `.value` (через `values_callable`) вместо имен enum.
+- Почему: устранить ошибку `invalid input value for enum habit_type: "NEGATIVE"` при создании привычки.
+- Подсистемы: db models / enum serialization.
+- Риск: средний (затрагивает запись/чтение enum-полей).
