@@ -141,3 +141,29 @@ class HabitService:
             .limit(1)
         )
         return await self.session.scalar(query)
+
+    async def get_checkins_for_date(self, user_id: int, target_date: date) -> list[HabitCheckin]:
+        query = (
+            select(HabitCheckin)
+            .join(Habit, Habit.id == HabitCheckin.habit_id)
+            .where(Habit.user_id == user_id, HabitCheckin.check_date == target_date)
+            .order_by(HabitCheckin.created_at.asc())
+        )
+        result = await self.session.scalars(query)
+        return list(result)
+
+    async def get_checkins_for_range(
+        self, user_id: int, start_date: date, end_date: date
+    ) -> list[HabitCheckin]:
+        query = (
+            select(HabitCheckin)
+            .join(Habit, Habit.id == HabitCheckin.habit_id)
+            .where(
+                Habit.user_id == user_id,
+                HabitCheckin.check_date >= start_date,
+                HabitCheckin.check_date <= end_date,
+            )
+            .order_by(HabitCheckin.check_date.asc(), HabitCheckin.created_at.asc())
+        )
+        result = await self.session.scalars(query)
+        return list(result)
