@@ -211,3 +211,19 @@
 - Почему: устранить ошибку `invalid input value for enum habit_type: "NEGATIVE"` при создании привычки.
 - Подсистемы: db models / enum serialization.
 - Риск: средний (затрагивает запись/чтение enum-полей).
+
+### 969a7f3
+- Дата: 2026-04-11
+- Сообщение: `docs: append enum serialization fix and latest commit entries`
+- Что сделано: append-only спецификации и журнал коммитов дополнены фиксацией исправления enum-serializaton и связанных изменений.
+- Почему: поддержание полного неизменяемого аудита функционала.
+- Подсистемы: documentation.
+- Риск: низкий.
+
+### 2dd8903
+- Дата: 2026-04-11
+- Сообщение: `feat: streamline routine ui and add dated day-offs with weekly review flow`
+- Что сделано: упрощен рабочий интерфейс рутины, управление привычками вынесено в настройки, добавлены emoji-иконки привычек, day-off выбор по датам недели/месяца, исправлен export user-context, добавлено воспроизведение ГС в дневнике, внедрен weekly digest с комментарием в дневник.
+- Почему: снизить когнитивную нагрузку в ежедневном режиме и закрыть ключевые UX/надежность проблемы.
+- Подсистемы: handlers UX/navigation, habits FSM, export flow, diary playback, day-off UX, background jobs, db schema.
+- Риск: средний-высокий (изменены callback-контракты, добавлен фоновой джоб и новая таблица).
