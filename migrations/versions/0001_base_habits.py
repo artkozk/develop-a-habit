@@ -16,10 +16,23 @@ branch_labels = None
 depends_on = None
 
 
-habit_type = sa.Enum("positive", "negative", name="habit_type")
-time_slot = sa.Enum("morning", "day", "evening", name="time_slot")
-schedule_type = sa.Enum("daily", "every_other_day", "specific_weekdays", name="schedule_type")
-checkin_status = sa.Enum("done", "missed", "violated", "optional_done", name="checkin_status")
+habit_type = sa.Enum("positive", "negative", name="habit_type", create_type=False)
+time_slot = sa.Enum("morning", "day", "evening", name="time_slot", create_type=False)
+schedule_type = sa.Enum(
+    "daily",
+    "every_other_day",
+    "specific_weekdays",
+    name="schedule_type",
+    create_type=False,
+)
+checkin_status = sa.Enum(
+    "done",
+    "missed",
+    "violated",
+    "optional_done",
+    name="checkin_status",
+    create_type=False,
+)
 
 
 def upgrade() -> None:
