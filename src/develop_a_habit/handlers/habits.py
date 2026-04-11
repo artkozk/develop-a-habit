@@ -101,20 +101,6 @@ def _habit_emoji(habit: Habit) -> str:
     return habit.icon_emoji or ""
 
 
-def _strike_text(value: str) -> str:
-    # Telegram inline button text has no rich text formatting.
-    # Use Unicode "combining short solidus overlay" (U+0337), which is visually cleaner
-    # in Telegram clients than long overlay variants. Punctuation is left unchanged.
-    punctuation = {":", ".", ",", ";", "!", "?", "-", "_", "/", "\\", "|", "(", ")", "[", "]"}
-    parts: list[str] = []
-    for char in value:
-        if char.isspace() or char in punctuation:
-            parts.append(char)
-        else:
-            parts.append(f"{char}\u0337")
-    return "".join(parts)
-
-
 def _view_toggle_button(view_mode: str) -> InlineKeyboardButton:
     if view_mode == "all":
         return InlineKeyboardButton(text="↩️ Текущий период", callback_data="habits:menu:auto")
@@ -139,8 +125,6 @@ def _menu_keyboard(
         status = checkin_map.get((habit.id, action_slot.value))
         marker = _status_marker(status, habit.habit_type)
         name = habit.name
-        if status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}:
-            name = _strike_text(name)
         icon = _habit_emoji(habit)
         item_text = f"{marker} {name}" if not icon else f"{marker} {icon} {name}"
         sport_target = compute_linear_target(habit, target_date=target_date)
