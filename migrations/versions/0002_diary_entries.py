@@ -7,6 +7,7 @@ Create Date: 2026-04-11
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -16,7 +17,7 @@ branch_labels = None
 depends_on = None
 
 
-diary_entry_type = sa.Enum("text", "voice", "mixed", name="diary_entry_type")
+diary_entry_type = postgresql.ENUM("text", "voice", "mixed", name="diary_entry_type", create_type=False)
 
 
 def upgrade() -> None:
