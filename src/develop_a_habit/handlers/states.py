@@ -8,3 +8,4 @@ class HabitStates(StatesGroup):
 
 class DiaryStates(StatesGroup):
     waiting_diary_text = State()
+    waiting_diary_voice = State()

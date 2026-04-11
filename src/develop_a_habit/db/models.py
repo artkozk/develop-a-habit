@@ -127,3 +127,43 @@ class DiaryEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     user: Mapped[User] = relationship(back_populates="diary_entries")
+    voice: Mapped["DiaryVoice | None"] = relationship(
+        back_populates="entry", cascade="all, delete-orphan"
+    )
+    transcript: Mapped["DiaryTranscript | None"] = relationship(
+        back_populates="entry", cascade="all, delete-orphan"
+    )
+
+
+class DiaryVoice(Base):
+    __tablename__ = "diary_voice"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entry_id: Mapped[int] = mapped_column(
+        ForeignKey("diary_entries.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    telegram_file_id: Mapped[str] = mapped_column(String(256), index=True)
+    telegram_file_unique_id: Mapped[str] = mapped_column(String(256), index=True)
+    duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mime: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    entry: Mapped[DiaryEntry] = relationship(back_populates="voice")
+
+
+class DiaryTranscript(Base):
+    __tablename__ = "diary_transcripts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entry_id: Mapped[int] = mapped_column(
+        ForeignKey("diary_entries.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stt_status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    entry: Mapped[DiaryEntry] = relationship(back_populates="transcript")
