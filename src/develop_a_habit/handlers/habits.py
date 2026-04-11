@@ -212,16 +212,38 @@ def _sport_adherence_keyboard(habit_id: int, slot: TimeSlot, selected_slot: str)
     )
 
 
-def _sport_settings_keyboard(habit_id: int, progression_enabled: bool) -> InlineKeyboardMarkup:
+def _sport_settings_keyboard(
+    habit_id: int,
+    progression_enabled: bool,
+    preset: tuple[int, int] | None = None,
+) -> InlineKeyboardMarkup:
     toggle_label = "🔁 Прогрессия: ВКЛ" if progression_enabled else "🔁 Прогрессия: ВЫКЛ"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎯 Изменить базу (NxM)", callback_data=f"habits:sportcfg:base:{habit_id}")],
-            [InlineKeyboardButton(text="📈 Изменить шаг (повт/нед)", callback_data=f"habits:sportcfg:step:{habit_id}")],
-            [InlineKeyboardButton(text=toggle_label, callback_data=f"habits:sportcfg:toggle:{habit_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
-        ]
-    )
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🎯 Изменить базу (NxM)", callback_data=f"habits:sportcfg:base:{habit_id}")],
+        [InlineKeyboardButton(text="📈 Изменить шаг (повт/нед)", callback_data=f"habits:sportcfg:step:{habit_id}")],
+        [InlineKeyboardButton(text=toggle_label, callback_data=f"habits:sportcfg:toggle:{habit_id}")],
+    ]
+    if preset is not None:
+        sets, reps = preset
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"⚡ Быстрый пресет {sets}x{reps}",
+                    callback_data=f"habits:sportcfg:preset:{habit_id}:{sets}:{reps}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _recommended_sport_preset(habit_name: str) -> tuple[int, int] | None:
+    value = habit_name.lower()
+    if "подтяг" in value:
+        return 2, 12
+    if "отжим" in value:
+        return 2, 15
+    return None
 
 
 def _create_type_keyboard() -> InlineKeyboardMarkup:
@@ -385,6 +407,10 @@ async def _render_sport_config(
     )
     step_label = habit.sport_linear_step_reps if habit.sport_linear_step_reps is not None else 0
     progress_label = "включена" if habit.sport_progression_enabled else "выключена"
+    recommended = _recommended_sport_preset(habit.name)
+    recommended_line = ""
+    if recommended is not None:
+        recommended_line = f"\nРекомендованный пресет: {recommended[0]}x{recommended[1]}"
 
     text = (
         f"🏋️ Настройки спорт-привычки\n"
@@ -393,10 +419,12 @@ async def _render_sport_config(
         f"Шаг: +{step_label} повт/нед\n"
         f"Прогрессия: {progress_label}\n"
         f"Цель на сегодня: {target_label}"
+        f"{recommended_line}"
     )
     keyboard = _sport_settings_keyboard(
         habit_id=habit.id,
         progression_enabled=habit.sport_progression_enabled,
+        preset=recommended,
     )
 
     if isinstance(target, Message):
@@ -507,6 +535,34 @@ async def habits_sportcfg_toggle(callback: CallbackQuery) -> None:
             await callback.message.answer("Привычка не найдена")
             return
         habit.sport_progression_enabled = not habit.sport_progression_enabled
+        await session.commit()
+
+    await _render_sport_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
+
+
+@router.callback_query(F.data.startswith("habits:sportcfg:preset:"))
+async def habits_sportcfg_preset(callback: CallbackQuery) -> None:
+    await callback.answer("Применяю...")
+    _, _, _, habit_id_raw, sets_raw, reps_raw = callback.data.split(":")
+    habit_id = int(habit_id_raw)
+    sets = int(sets_raw)
+    reps = int(reps_raw)
+
+    settings = get_settings()
+    async with AsyncSessionFactory() as session:
+        services = build_services(session)
+        user = await services.user_service.get_or_create_by_telegram_id(
+            telegram_user_id=callback.from_user.id,
+            timezone=settings.timezone_default,
+        )
+        habit = await session.scalar(select(Habit).where(Habit.id == habit_id, Habit.user_id == user.id))
+        if habit is None:
+            await callback.message.answer("Привычка не найдена")
+            return
+
+        habit.sport_base_sets = sets
+        habit.sport_base_reps = reps
+        habit.sport_start_date = date.today()
         await session.commit()
 
     await _render_sport_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
