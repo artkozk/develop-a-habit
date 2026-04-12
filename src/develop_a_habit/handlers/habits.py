@@ -300,13 +300,32 @@ def _recommended_sport_preset(habit_name: str) -> tuple[int, int] | None:
     return None
 
 
-def _create_slot_keyboard() -> InlineKeyboardMarkup:
+def _normalize_slot_selection(slot_values: list[str] | None) -> list[TimeSlot]:
+    selected: set[TimeSlot] = set()
+    for value in slot_values or []:
+        try:
+            selected.add(TimeSlot(value))
+        except ValueError:
+            continue
+    if TimeSlot.ALL_DAY in selected:
+        return [TimeSlot.ALL_DAY]
+    return sorted(selected, key=lambda slot: DISPLAY_SLOT_ORDER[slot])
+
+
+def _create_slot_keyboard(selected: list[TimeSlot]) -> InlineKeyboardMarkup:
+    selected_set = set(selected)
+
+    def label(slot: TimeSlot) -> str:
+        marker = "✅ " if slot in selected_set else ""
+        return f"{marker}{SLOT_LABELS[slot]}"
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🌅 Утро", callback_data="habits:add:slot:morning")],
-            [InlineKeyboardButton(text="☀️ День", callback_data="habits:add:slot:day")],
-            [InlineKeyboardButton(text="🌙 Вечер", callback_data="habits:add:slot:evening")],
-            [InlineKeyboardButton(text="🗓️ Весь день", callback_data="habits:add:slot:all_day")],
+            [InlineKeyboardButton(text=label(TimeSlot.MORNING), callback_data="habits:add:slot:toggle:morning")],
+            [InlineKeyboardButton(text=label(TimeSlot.DAY), callback_data="habits:add:slot:toggle:day")],
+            [InlineKeyboardButton(text=label(TimeSlot.EVENING), callback_data="habits:add:slot:toggle:evening")],
+            [InlineKeyboardButton(text=label(TimeSlot.ALL_DAY), callback_data="habits:add:slot:toggle:all_day")],
+            [InlineKeyboardButton(text="Готово", callback_data="habits:add:slot:done")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="habits:manage")],
         ]
     )
@@ -555,29 +574,38 @@ async def _render_goal_config(
 
 def _build_rules_from_state(data: dict) -> tuple[list[ScheduleRuleInput], TimeSlot]:
     schedule_type = ScheduleType(data["schedule"])
-    slot = TimeSlot(data["slot"])
+    selected_slots = _normalize_slot_selection(data.get("slots"))
+    if not selected_slots and data.get("slot"):
+        # Backward compatibility for stale callback flows with single-slot payload.
+        selected_slots = _normalize_slot_selection([data["slot"]])
+    if not selected_slots:
+        selected_slots = [TimeSlot.ALL_DAY]
+    slot = selected_slots[0]
     rules: list[ScheduleRuleInput] = []
 
     if schedule_type == ScheduleType.SPECIFIC_WEEKDAYS:
         for weekday in data.get("weekdays", []):
+            for each_slot in selected_slots:
+                rules.append(
+                    ScheduleRuleInput(
+                        schedule_type=ScheduleType.SPECIFIC_WEEKDAYS,
+                        time_slot=each_slot,
+                        weekday=weekday,
+                    )
+                )
+    elif schedule_type == ScheduleType.EVERY_OTHER_DAY:
+        for each_slot in selected_slots:
             rules.append(
                 ScheduleRuleInput(
-                    schedule_type=ScheduleType.SPECIFIC_WEEKDAYS,
-                    time_slot=slot,
-                    weekday=weekday,
+                    schedule_type=ScheduleType.EVERY_OTHER_DAY,
+                    time_slot=each_slot,
+                    interval_days=2,
+                    start_from=date.today(),
                 )
             )
-    elif schedule_type == ScheduleType.EVERY_OTHER_DAY:
-        rules.append(
-            ScheduleRuleInput(
-                schedule_type=ScheduleType.EVERY_OTHER_DAY,
-                time_slot=slot,
-                interval_days=2,
-                start_from=date.today(),
-            )
-        )
     else:
-        rules.append(ScheduleRuleInput(schedule_type=ScheduleType.DAILY, time_slot=slot))
+        for each_slot in selected_slots:
+            rules.append(ScheduleRuleInput(schedule_type=ScheduleType.DAILY, time_slot=each_slot))
 
     return rules, slot
 
@@ -1070,19 +1098,68 @@ async def add_habit_start(callback: CallbackQuery, state: FSMContext) -> None:
 async def add_habit_type(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     habit_type = callback.data.split(":")[-1]
-    await state.update_data(habit_type=habit_type)
+    await state.update_data(habit_type=habit_type, slots=[])
     await safe_edit_text(
         callback.message,
-        "Шаг 2/5. Выберите слот времени:",
-        reply_markup=_create_slot_keyboard(),
+        "Шаг 2/5. Выберите один или несколько слотов времени:",
+        reply_markup=_create_slot_keyboard([]),
+    )
+
+
+@router.callback_query(F.data.startswith("habits:add:slot:toggle:"))
+async def add_habit_slot_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    slot = TimeSlot(callback.data.split(":")[-1])
+    data = await state.get_data()
+    selected = set(_normalize_slot_selection(data.get("slots")))
+
+    if slot == TimeSlot.ALL_DAY:
+        selected = {TimeSlot.ALL_DAY}
+    else:
+        selected.discard(TimeSlot.ALL_DAY)
+        if slot in selected:
+            selected.remove(slot)
+        else:
+            selected.add(slot)
+
+    normalized = _normalize_slot_selection([item.value for item in selected])
+    await state.update_data(slots=[item.value for item in normalized])
+    await safe_edit_reply_markup(callback.message, reply_markup=_create_slot_keyboard(normalized))
+
+
+@router.callback_query(F.data == "habits:add:slot:done")
+async def add_habit_slot_done(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    selected = _normalize_slot_selection(data.get("slots"))
+    if not selected:
+        await safe_edit_text(
+            callback.message,
+            "Шаг 2/5. Выберите хотя бы один слот времени:",
+            reply_markup=_create_slot_keyboard([]),
+        )
+        return
+
+    await safe_edit_text(
+        callback.message,
+        "Шаг 3/5. Выберите расписание:",
+        reply_markup=_create_schedule_keyboard(),
     )
 
 
 @router.callback_query(F.data.startswith("habits:add:slot:"))
-async def add_habit_slot(callback: CallbackQuery, state: FSMContext) -> None:
+async def add_habit_slot_legacy(callback: CallbackQuery, state: FSMContext) -> None:
+    """Backward compatibility for stale single-slot callback buttons."""
     await callback.answer()
-    slot = callback.data.split(":")[-1]
-    await state.update_data(slot=slot)
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        return
+    slot_value = parts[-1]
+    try:
+        slot = TimeSlot(slot_value)
+    except ValueError:
+        return
+    await state.update_data(slots=[slot.value], slot=slot.value)
     await safe_edit_text(
         callback.message,
         "Шаг 3/5. Выберите расписание:",

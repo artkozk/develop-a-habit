@@ -1,6 +1,7 @@
 from datetime import date
+from collections import defaultdict
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,6 +11,7 @@ from develop_a_habit.db.models import (
     Habit,
     HabitCheckin,
     HabitScheduleRule,
+    HabitType,
     TimeSlot,
 )
 from develop_a_habit.domain.schedule_engine import is_rule_due
@@ -23,6 +25,56 @@ class HabitService:
     async def create_habit(self, user_id: int, payload: HabitCreateInput) -> Habit:
         goal_days = payload.goal_days if payload.goal_days is not None and payload.goal_days > 0 else 30
         goal_start_date = payload.goal_start_date or date.today()
+        normalized_name = (payload.name or "").strip().lower()
+        existing = await self.session.scalar(
+            select(Habit)
+            .where(
+                Habit.user_id == user_id,
+                Habit.is_active.is_(True),
+                Habit.habit_type == payload.habit_type,
+                Habit.is_sport == payload.is_sport,
+                func.lower(Habit.name) == normalized_name,
+            )
+            .options(selectinload(Habit.schedule_rules))
+            .order_by(Habit.created_at.asc(), Habit.id.asc())
+            .limit(1)
+        )
+
+        if existing is not None:
+            existing_rule_keys = {self._schedule_rule_key(rule) for rule in existing.schedule_rules}
+            for rule in payload.schedule_rules:
+                candidate = (
+                    rule.schedule_type.value,
+                    rule.time_slot.value,
+                    rule.weekday,
+                    max(rule.interval_days, 1),
+                    rule.start_from,
+                )
+                if candidate in existing_rule_keys:
+                    continue
+                self.session.add(
+                    HabitScheduleRule(
+                        habit_id=existing.id,
+                        schedule_type=rule.schedule_type,
+                        time_slot=rule.time_slot,
+                        weekday=rule.weekday,
+                        interval_days=max(rule.interval_days, 1),
+                        start_from=rule.start_from,
+                    )
+                )
+                existing_rule_keys.add(candidate)
+
+            if not existing.icon_emoji and payload.icon_emoji:
+                existing.icon_emoji = payload.icon_emoji
+            if existing.goal_days is None or existing.goal_days <= 0:
+                existing.goal_days = goal_days
+            if existing.goal_start_date is None:
+                existing.goal_start_date = goal_start_date
+
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+
         habit = Habit(
             user_id=user_id,
             name=payload.name,
@@ -56,6 +108,136 @@ class HabitService:
         await self.session.commit()
         await self.session.refresh(habit)
         return habit
+
+    @staticmethod
+    def _habit_group_key(habit: Habit) -> tuple[str, str, bool]:
+        normalized_name = (habit.name or "").strip().lower()
+        return (normalized_name, habit.habit_type.value, bool(habit.is_sport))
+
+    @staticmethod
+    def _schedule_rule_key(rule: HabitScheduleRule) -> tuple[str, str, int | None, int, date | None]:
+        return (
+            rule.schedule_type.value,
+            rule.time_slot.value,
+            rule.weekday,
+            rule.interval_days,
+            rule.start_from,
+        )
+
+    @staticmethod
+    def _status_rank(habit_type: HabitType, status: CheckinStatus) -> int:
+        if habit_type == HabitType.NEGATIVE:
+            ranks = {
+                CheckinStatus.VIOLATED: 4,
+                CheckinStatus.DONE: 3,
+                CheckinStatus.OPTIONAL_DONE: 2,
+                CheckinStatus.MISSED: 1,
+            }
+            return ranks.get(status, 0)
+
+        ranks = {
+            CheckinStatus.DONE: 4,
+            CheckinStatus.OPTIONAL_DONE: 3,
+            CheckinStatus.MISSED: 1,
+            CheckinStatus.VIOLATED: 1,
+        }
+        return ranks.get(status, 0)
+
+    @classmethod
+    def _prefer_checkin(cls, habit_type: HabitType, left: HabitCheckin, right: HabitCheckin) -> HabitCheckin:
+        if cls._status_rank(habit_type, right.status) > cls._status_rank(habit_type, left.status):
+            winner = right
+            loser = left
+        else:
+            winner = left
+            loser = right
+
+        if winner.actual_sets is None:
+            winner.actual_sets = loser.actual_sets
+        if winner.actual_reps_csv is None:
+            winner.actual_reps_csv = loser.actual_reps_csv
+        if winner.target_sets is None:
+            winner.target_sets = loser.target_sets
+        if winner.target_reps is None:
+            winner.target_reps = loser.target_reps
+        if winner.sport_plan_adhered is None:
+            winner.sport_plan_adhered = loser.sport_plan_adhered
+        if winner.note is None:
+            winner.note = loser.note
+        return winner
+
+    async def merge_duplicate_habits_by_name(self, user_id: int) -> int:
+        """Merge duplicate habits with the same normalized name/type/sport flag."""
+        query = (
+            select(Habit)
+            .where(Habit.user_id == user_id)
+            .options(
+                selectinload(Habit.schedule_rules),
+                selectinload(Habit.checkins),
+            )
+            .order_by(Habit.created_at.asc(), Habit.id.asc())
+        )
+        habits = list(await self.session.scalars(query))
+        grouped: dict[tuple[str, str, bool], list[Habit]] = defaultdict(list)
+        for habit in habits:
+            grouped[self._habit_group_key(habit)].append(habit)
+
+        merged_count = 0
+        for group_habits in grouped.values():
+            if len(group_habits) <= 1:
+                continue
+
+            primary = group_habits[0]
+            for duplicate in group_habits[1:]:
+                await self._merge_habit_pair(primary=primary, duplicate=duplicate)
+                merged_count += 1
+
+        if merged_count:
+            await self.session.commit()
+        return merged_count
+
+    async def _merge_habit_pair(self, primary: Habit, duplicate: Habit) -> None:
+        if not primary.icon_emoji and duplicate.icon_emoji:
+            primary.icon_emoji = duplicate.icon_emoji
+
+        if not primary.is_sport and duplicate.is_sport:
+            primary.is_sport = True
+            primary.sport_base_sets = duplicate.sport_base_sets
+            primary.sport_base_reps = duplicate.sport_base_reps
+            primary.sport_linear_step_reps = duplicate.sport_linear_step_reps
+            primary.sport_progression_enabled = duplicate.sport_progression_enabled
+            primary.sport_start_date = duplicate.sport_start_date
+
+        if primary.goal_days is None and duplicate.goal_days is not None:
+            primary.goal_days = duplicate.goal_days
+        if primary.goal_start_date is None and duplicate.goal_start_date is not None:
+            primary.goal_start_date = duplicate.goal_start_date
+        primary.goal_completed_cycles = max(primary.goal_completed_cycles or 0, duplicate.goal_completed_cycles or 0)
+
+        existing_rule_keys = {self._schedule_rule_key(rule) for rule in primary.schedule_rules}
+        for rule in list(duplicate.schedule_rules):
+            rule_key = self._schedule_rule_key(rule)
+            if rule_key in existing_rule_keys:
+                await self.session.delete(rule)
+                continue
+            rule.habit_id = primary.id
+            existing_rule_keys.add(rule_key)
+
+        existing_checkins: dict[tuple[date, str], HabitCheckin] = {
+            (checkin.check_date, checkin.time_slot.value): checkin for checkin in primary.checkins
+        }
+        for checkin in list(duplicate.checkins):
+            checkin_key = (checkin.check_date, checkin.time_slot.value)
+            current = existing_checkins.get(checkin_key)
+            if current is None:
+                checkin.habit_id = primary.id
+                existing_checkins[checkin_key] = checkin
+                continue
+
+            self._prefer_checkin(primary.habit_type, current, checkin)
+            await self.session.delete(checkin)
+
+        await self.session.delete(duplicate)
 
     async def list_habits(self, user_id: int, active_only: bool = True) -> list[Habit]:
         query = select(Habit).where(Habit.user_id == user_id).options(selectinload(Habit.schedule_rules))
