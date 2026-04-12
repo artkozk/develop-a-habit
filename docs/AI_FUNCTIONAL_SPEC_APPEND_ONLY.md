@@ -169,3 +169,9 @@
   Причина: предотвращение создания дубликатов одной и той же привычки в БД. Коммит: 9639631.
 - Изменено на: `HabitService.merge_duplicate_habits_by_name(...)` реализует слияние дублей с переносом правил расписания и checkin-ов с резолвом конфликтующих статусов (`done` приоритет для positive, `violated` приоритет для negative).
   Причина: восстановление корректной агрегированной статистики по уже раздвоенным привычкам. Коммит: 9639631.
+- Изменено на: `MetricsService._is_mandatory_success(...)` для `HabitType.NEGATIVE` возвращает success при отсутствии checkin независимо от даты (`today` включительно), пока нет статуса `violated`.
+  Причина: устранение расхождения между default-marker `✅` в UI и расчетом completion в метриках.
+  Коммит: 467c302.
+- Изменено на: в `HabitService._merge_habit_pair(...)` перенос schedule_rules/checkins из duplicate в primary выполняется через `rule.habit = primary` и `checkin.habit = primary`.
+  Причина: избежать удаления перенесенных сущностей каскадом `delete-orphan` при удалении дубля.
+  Коммит: 467c302.
