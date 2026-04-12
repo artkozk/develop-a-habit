@@ -159,3 +159,5 @@
 - Изменено на: `HabitService.create_habit(...)` нормализует goal-поля: при пустой цели ставит `goal_days=30` и `goal_start_date=today`. Причина: скрытый дефолт цели для новых привычек. Коммит: 7abc2ef.
 - Изменено на: `HabitService.list_due_habits(...)` и `MetricsService._due_slots_for_habit(...)` отсекают даты раньше `habit.created_at.date()`. Причина: устранение завышенных due/success/streak до фактического появления привычки. Коммит: 7abc2ef.
 - Изменено на: миграция `0011_habit_goal_default_30` добавляет backfill текущих данных и server default `goal_days=30`. Причина: синхронизация текущих привычек с новой политикой дефолтной цели. Коммит: 7abc2ef.
+- Изменено на: правило расписания weekly digest вынесено в `jobs.schedule_utils.is_weekly_digest_due(local_now)` с условием `Sunday && local_time >= 17:30`; цикл проверки `weekly_digest_loop` уменьшен до 60 секунд для более точного попадания в время отправки.
+  Причина: перенос weekly summary и weekly comment prompt на 17:30 локального времени пользователя. Коммит: a9f3b93.
