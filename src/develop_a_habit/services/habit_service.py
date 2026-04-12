@@ -220,7 +220,7 @@ class HabitService:
             if rule_key in existing_rule_keys:
                 await self.session.delete(rule)
                 continue
-            rule.habit_id = primary.id
+            rule.habit = primary
             existing_rule_keys.add(rule_key)
 
         existing_checkins: dict[tuple[date, str], HabitCheckin] = {
@@ -230,7 +230,7 @@ class HabitService:
             checkin_key = (checkin.check_date, checkin.time_slot.value)
             current = existing_checkins.get(checkin_key)
             if current is None:
-                checkin.habit_id = primary.id
+                checkin.habit = primary
                 existing_checkins[checkin_key] = checkin
                 continue
 

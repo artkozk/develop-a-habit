@@ -333,7 +333,7 @@ class MetricsService:
                 return checkin.status in {CheckinStatus.DONE, CheckinStatus.OPTIONAL_DONE}
             return checkin.status != CheckinStatus.VIOLATED
 
-        if habit.habit_type == HabitType.NEGATIVE and target_date < today:
+        if habit.habit_type == HabitType.NEGATIVE:
             return True
 
         return False

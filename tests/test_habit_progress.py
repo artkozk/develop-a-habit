@@ -128,7 +128,7 @@ def test_habit_progress_ignores_days_before_habit_creation():
     )
 
     item = result[0]
-    assert item.adherence_days_total == 1
+    assert item.adherence_days_total == 2
     assert item.weekly_due_days == 2
-    assert item.weekly_success_days == 1
-    assert item.current_streak_days == 1
+    assert item.weekly_success_days == 2
+    assert item.current_streak_days == 2
