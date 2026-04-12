@@ -21,6 +21,8 @@ class HabitService:
         self.session = session
 
     async def create_habit(self, user_id: int, payload: HabitCreateInput) -> Habit:
+        goal_days = payload.goal_days if payload.goal_days is not None and payload.goal_days > 0 else 30
+        goal_start_date = payload.goal_start_date or date.today()
         habit = Habit(
             user_id=user_id,
             name=payload.name,
@@ -31,8 +33,8 @@ class HabitService:
             sport_linear_step_reps=payload.sport_linear_step_reps,
             sport_progression_enabled=payload.sport_progression_enabled,
             sport_start_date=payload.sport_start_date,
-            goal_days=payload.goal_days,
-            goal_start_date=payload.goal_start_date,
+            goal_days=goal_days,
+            goal_start_date=goal_start_date,
             goal_completed_cycles=payload.goal_completed_cycles,
             habit_type=payload.habit_type,
         )
@@ -80,6 +82,9 @@ class HabitService:
         habits = await self.list_habits(user_id=user_id, active_only=True)
         due: list[Habit] = []
         for habit in habits:
+            active_from = habit.created_at.date() if habit.created_at is not None else target_date
+            if target_date < active_from:
+                continue
             if any(is_rule_due(rule, target_date, slot=slot) for rule in habit.schedule_rules):
                 due.append(habit)
         return due

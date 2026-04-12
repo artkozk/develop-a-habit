@@ -94,3 +94,41 @@ def test_habit_progress_counts_streak_and_goal():
     assert item.goal_progress_days == 3
     assert item.goal_reached is True
     assert item.goal_completed_cycles == 1
+
+
+def test_habit_progress_ignores_days_before_habit_creation():
+    habit = Habit(
+        id=10,
+        user_id=1,
+        name="Не есть сладкое",
+        habit_type=HabitType.NEGATIVE,
+        created_at=datetime(2026, 4, 11, 9, 0, 0),
+        goal_days=30,
+        goal_start_date=date(2026, 4, 11),
+        goal_completed_cycles=0,
+    )
+    habit.schedule_rules = [
+        HabitScheduleRule(
+            habit_id=10,
+            schedule_type=ScheduleType.DAILY,
+            time_slot=TimeSlot.ALL_DAY,
+        )
+    ]
+
+    # No checkins: for negative habits past days are treated as success,
+    # but days before creation must not be counted.
+    service = MetricsService(FakeHabitProgressService([habit], checkins=[]))
+    result = asyncio.run(
+        service.compute_habit_progress(
+            user_id=1,
+            start_date=date(2026, 4, 7),
+            end_date=date(2026, 4, 13),
+            today=date(2026, 4, 12),
+        )
+    )
+
+    item = result[0]
+    assert item.adherence_days_total == 1
+    assert item.weekly_due_days == 2
+    assert item.weekly_success_days == 1
+    assert item.current_streak_days == 1

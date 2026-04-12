@@ -267,6 +267,9 @@ class MetricsService:
 
     @staticmethod
     def _due_slots_for_habit(habit: Habit, target_date: date) -> set[TimeSlot]:
+        active_from = habit.created_at.date() if habit.created_at is not None else target_date
+        if target_date < active_from:
+            return set()
         return {
             rule.time_slot
             for rule in habit.schedule_rules

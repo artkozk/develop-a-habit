@@ -708,8 +708,8 @@ async def habits_goalcfg_clear(callback: CallbackQuery) -> None:
                 reply_markup=_input_back_keyboard("habits:manage"),
             )
             return
-        habit.goal_days = None
-        habit.goal_start_date = None
+        habit.goal_days = 30
+        habit.goal_start_date = date.today()
         await session.commit()
 
     await _render_goal_config(callback, telegram_user_id=callback.from_user.id, habit_id=habit_id)
