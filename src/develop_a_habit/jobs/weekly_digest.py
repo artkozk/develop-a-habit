@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from develop_a_habit.db.models import WeeklyPrompt
 from develop_a_habit.db.session import AsyncSessionFactory
+from develop_a_habit.jobs.schedule_utils import is_weekly_digest_due
 from develop_a_habit.services import build_services
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ async def send_weekly_digest_if_due(bot: Bot) -> None:
                 tz = ZoneInfo("Europe/Moscow")
 
             local_now = now_utc.astimezone(tz)
-            if local_now.weekday() != 6 or local_now.hour < 21:
+            if not is_weekly_digest_due(local_now):
                 continue
 
             week_start = _week_start(local_now.date())
@@ -117,7 +118,7 @@ async def send_weekly_digest_if_due(bot: Bot) -> None:
                 await session.rollback()
 
 
-async def weekly_digest_loop(bot: Bot, interval_seconds: int = 1800) -> None:
+async def weekly_digest_loop(bot: Bot, interval_seconds: int = 60) -> None:
     while True:
         try:
             await send_weekly_digest_if_due(bot)
