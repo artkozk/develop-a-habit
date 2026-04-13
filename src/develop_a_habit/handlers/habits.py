@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from collections import Counter
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -58,26 +59,14 @@ def _habit_due_slots(habit: Habit, target_date: date) -> set[TimeSlot]:
     }
 
 
-def _resolve_action_slot_for_habit(habit: Habit, selected_slot: str, target_date: date) -> TimeSlot:
-    due_slots = _habit_due_slots(habit, target_date=target_date)
-    current_slot = resolve_slot_by_hour(datetime.now())
-
-    if selected_slot == "all":
-        if due_slots:
-            return sorted(due_slots, key=lambda slot: DISPLAY_SLOT_ORDER[slot])[0]
-        if habit.schedule_rules:
-            schedule_slots = {rule.time_slot for rule in habit.schedule_rules}
-            return sorted(schedule_slots, key=lambda slot: DISPLAY_SLOT_ORDER[slot])[0]
-        return current_slot
-
-    selected = TimeSlot(selected_slot)
-    if selected == TimeSlot.ALL_DAY:
-        return TimeSlot.ALL_DAY
-    if selected in due_slots:
-        return selected
-    if TimeSlot.ALL_DAY in due_slots:
-        return TimeSlot.ALL_DAY
-    return selected
+def _slot_short_label(slot: TimeSlot) -> str:
+    labels = {
+        TimeSlot.MORNING: "утро",
+        TimeSlot.DAY: "день",
+        TimeSlot.EVENING: "вечер",
+        TimeSlot.ALL_DAY: "весь день",
+    }
+    return labels[slot]
 
 
 def _habit_primary_slot_for_sort(habit: Habit) -> TimeSlot:
@@ -91,21 +80,31 @@ def _habit_created_sort_key(habit: Habit) -> tuple[datetime, int]:
     return (habit.created_at or datetime.min, habit.id)
 
 
-def _sorted_habits_for_menu(
+def _build_menu_items(
     habits: list[Habit],
     selected_slot: str,
+    show_all_due: bool,
     target_date: date,
     checkin_map: dict[tuple[int, str], CheckinStatus],
 ) -> list[tuple[Habit, TimeSlot, CheckinStatus | None]]:
     items: list[tuple[Habit, TimeSlot, CheckinStatus | None]] = []
+    selected = TimeSlot(selected_slot) if selected_slot != "all" else None
     for habit in habits:
-        action_slot = _resolve_action_slot_for_habit(
-            habit=habit,
-            selected_slot=selected_slot,
-            target_date=target_date,
-        )
-        status = checkin_map.get((habit.id, action_slot.value))
-        items.append((habit, action_slot, status))
+        due_slots = sorted(_habit_due_slots(habit, target_date=target_date), key=lambda slot: DISPLAY_SLOT_ORDER[slot])
+        if not due_slots:
+            continue
+
+        if show_all_due:
+            visible_slots = due_slots
+        else:
+            allowed_slots = {selected, TimeSlot.ALL_DAY} if selected is not None else {TimeSlot.ALL_DAY}
+            visible_slots = [slot for slot in due_slots if slot in allowed_slots]
+            if not visible_slots:
+                continue
+
+        for slot in visible_slots:
+            status = checkin_map.get((habit.id, slot.value))
+            items.append((habit, slot, status))
 
     items.sort(
         key=lambda item: (
@@ -130,21 +129,27 @@ def _menu_keyboard(
     habits: list[Habit],
     selected_slot: str,
     view_mode: str,
+    show_all_due: bool,
     target_date: date,
     checkin_map: dict[tuple[int, str], CheckinStatus],
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [[_view_toggle_button(view_mode)]]
-
-    for habit, action_slot, status in _sorted_habits_for_menu(
+    items = _build_menu_items(
         habits=habits,
         selected_slot=selected_slot,
+        show_all_due=show_all_due,
         target_date=target_date,
         checkin_map=checkin_map,
-    ):
+    )
+    per_habit_count = Counter(habit.id for habit, _slot, _status in items)
+
+    for habit, action_slot, status in items:
         marker = _status_marker(status, habit.habit_type)
         name = habit.name
         icon = _habit_emoji(habit)
         item_text = f"{marker} {name}" if not icon else f"{marker} {icon} {name}"
+        if per_habit_count[habit.id] > 1:
+            item_text = f"{item_text} · {_slot_short_label(action_slot)}"
         sport_target = compute_linear_target(habit, target_date=target_date)
         if sport_target is not None:
             sets, reps = sport_target
@@ -388,6 +393,7 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
     view_mode = "all" if selected_slot == "all" else "auto"
     selected_slot = _resolve_selected_slot(selected_slot)
     used_fallback = False
+    show_all_due = view_mode == "all"
 
     async with AsyncSessionFactory() as session:
         services = build_services(session)
@@ -406,6 +412,7 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
                 # Fallback: current period is empty, so show all due habits for today.
                 habits = await services.habit_service.list_due_habits(user.id, target_date=target_date, slot=None)
                 used_fallback = True
+                show_all_due = True
         checkins = await services.habit_service.get_checkins_for_date(user_id=user.id, target_date=target_date)
 
     checkin_map = {(item.habit_id, item.time_slot.value): item.status for item in checkins}
@@ -423,6 +430,7 @@ async def _render_menu(target: Message | CallbackQuery, telegram_user_id: int, s
         habits=habits,
         selected_slot=selected_slot,
         view_mode=view_mode,
+        show_all_due=show_all_due,
         target_date=target_date,
         checkin_map=checkin_map,
     )
