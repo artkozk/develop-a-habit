@@ -130,9 +130,15 @@ class MetricsService:
         habits = await self.habit_service.list_habits(user_id=user_id, active_only=True)
         if not habits:
             return []
+        user_created_date = await self.habit_service.get_user_created_date(user_id=user_id)
 
         history_start = min(
-            (habit.created_at.date() if habit.created_at is not None else period_start) for habit in habits
+            self._habit_active_from(
+                habit=habit,
+                target_date=period_start,
+                user_created_date=user_created_date,
+            )
+            for habit in habits
         )
         history_start = min(history_start, period_start)
         if history_start > today:
@@ -159,7 +165,11 @@ class MetricsService:
             for day in _date_range(history_start, today):
                 if self._is_day_off(day, day_off_exact, day_off_weekdays):
                     continue
-                due_slots = self._due_slots_for_habit(habit, day)
+                due_slots = self._due_slots_for_habit(
+                    habit,
+                    day,
+                    user_created_date=user_created_date,
+                )
                 if not due_slots:
                     continue
 
@@ -185,6 +195,7 @@ class MetricsService:
                 day_off_exact=day_off_exact,
                 day_off_weekdays=day_off_weekdays,
                 checkin_map=checkin_map,
+                user_created_date=user_created_date,
             )
 
             goal_progress_days = 0
@@ -194,7 +205,11 @@ class MetricsService:
                 for day in _date_range(goal_from, today):
                     if self._is_day_off(day, day_off_exact, day_off_weekdays):
                         continue
-                    due_slots = self._due_slots_for_habit(habit, day)
+                    due_slots = self._due_slots_for_habit(
+                        habit,
+                        day,
+                        user_created_date=user_created_date,
+                    )
                     if not due_slots:
                         continue
                     success, _failure = self._day_success(
@@ -234,6 +249,7 @@ class MetricsService:
         day_off_exact: set[date],
         day_off_weekdays: set[int],
         checkin_map: dict[tuple[int, date, str], HabitCheckin],
+        user_created_date: date | None = None,
     ) -> int:
         streak = 0
         cursor = today
@@ -241,7 +257,11 @@ class MetricsService:
             if self._is_day_off(cursor, day_off_exact, day_off_weekdays):
                 cursor -= timedelta(days=1)
                 continue
-            due_slots = self._due_slots_for_habit(habit, cursor)
+            due_slots = self._due_slots_for_habit(
+                habit,
+                cursor,
+                user_created_date=user_created_date,
+            )
             if not due_slots:
                 cursor -= timedelta(days=1)
                 continue
@@ -266,8 +286,28 @@ class MetricsService:
         return streak
 
     @staticmethod
-    def _due_slots_for_habit(habit: Habit, target_date: date) -> set[TimeSlot]:
+    def _habit_active_from(
+        habit: Habit,
+        target_date: date,
+        user_created_date: date | None = None,
+    ) -> date:
         active_from = habit.created_at.date() if habit.created_at is not None else target_date
+        if user_created_date is not None and active_from == user_created_date:
+            return user_created_date + timedelta(days=1)
+        return active_from
+
+    @classmethod
+    def _due_slots_for_habit(
+        cls,
+        habit: Habit,
+        target_date: date,
+        user_created_date: date | None = None,
+    ) -> set[TimeSlot]:
+        active_from = cls._habit_active_from(
+            habit=habit,
+            target_date=target_date,
+            user_created_date=user_created_date,
+        )
         if target_date < active_from:
             return set()
         return {

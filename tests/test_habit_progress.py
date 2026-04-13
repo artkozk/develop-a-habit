@@ -14,11 +14,19 @@ from develop_a_habit.services.metrics_service import MetricsService
 
 
 class FakeHabitProgressService:
-    def __init__(self, habits, checkins, day_off_exact=None, day_off_weekdays=None):
+    def __init__(
+        self,
+        habits,
+        checkins,
+        day_off_exact=None,
+        day_off_weekdays=None,
+        user_created_date: date | None = None,
+    ):
         self._habits = habits
         self._checkins = checkins
         self._day_off_exact = day_off_exact or set()
         self._day_off_weekdays = day_off_weekdays or set()
+        self._user_created_date = user_created_date
 
     async def list_habits(self, user_id: int, active_only: bool = True):
         return self._habits
@@ -33,6 +41,9 @@ class FakeHabitProgressService:
     async def get_day_off_snapshot(self, user_id: int, start_date: date, end_date: date):
         exact = {d for d in self._day_off_exact if start_date <= d <= end_date}
         return exact, set(self._day_off_weekdays)
+
+    async def get_user_created_date(self, user_id: int) -> date | None:
+        return self._user_created_date
 
 
 def test_habit_progress_counts_streak_and_goal():
@@ -132,3 +143,60 @@ def test_habit_progress_ignores_days_before_habit_creation():
     assert item.weekly_due_days == 2
     assert item.weekly_success_days == 2
     assert item.current_streak_days == 2
+
+
+def test_habit_progress_skips_onboarding_day_for_first_day_habit():
+    habit = Habit(
+        id=20,
+        user_id=1,
+        name="Чтение",
+        habit_type=HabitType.POSITIVE,
+        created_at=datetime(2026, 4, 11, 9, 0, 0),  # Saturday
+        goal_days=30,
+        goal_start_date=date(2026, 4, 11),
+        goal_completed_cycles=0,
+    )
+    habit.schedule_rules = [
+        HabitScheduleRule(
+            habit_id=20,
+            schedule_type=ScheduleType.DAILY,
+            time_slot=TimeSlot.MORNING,
+        )
+    ]
+
+    checkins = [
+        HabitCheckin(
+            habit_id=20,
+            check_date=date(2026, 4, 11),
+            time_slot=TimeSlot.MORNING,
+            status=CheckinStatus.DONE,
+        ),
+        HabitCheckin(
+            habit_id=20,
+            check_date=date(2026, 4, 12),
+            time_slot=TimeSlot.MORNING,
+            status=CheckinStatus.DONE,
+        ),
+    ]
+
+    service = MetricsService(
+        FakeHabitProgressService(
+            [habit],
+            checkins,
+            user_created_date=date(2026, 4, 11),
+        )
+    )
+    result = asyncio.run(
+        service.compute_habit_progress(
+            user_id=1,
+            start_date=date(2026, 4, 11),
+            end_date=date(2026, 4, 13),
+            today=date(2026, 4, 12),
+        )
+    )
+
+    item = result[0]
+    # Saturday (onboarding day) is ignored, counting starts from Sunday.
+    assert item.weekly_due_days == 1
+    assert item.weekly_success_days == 1
+    assert item.current_streak_days == 1

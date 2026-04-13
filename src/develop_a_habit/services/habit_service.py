@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from collections import defaultdict
 
 from sqlalchemy import and_, delete, func, or_, select
@@ -13,6 +13,7 @@ from develop_a_habit.db.models import (
     HabitScheduleRule,
     HabitType,
     TimeSlot,
+    User,
 )
 from develop_a_habit.domain.schedule_engine import is_rule_due
 from develop_a_habit.services.dto import CheckinInput, HabitCreateInput
@@ -21,6 +22,24 @@ from develop_a_habit.services.dto import CheckinInput, HabitCreateInput
 class HabitService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_user_created_date(self, user_id: int) -> date | None:
+        created_at = await self.session.scalar(select(User.created_at).where(User.id == user_id))
+        if created_at is None:
+            return None
+        return created_at.date()
+
+    @staticmethod
+    def _habit_effective_start_date(
+        habit: Habit,
+        target_date: date,
+        user_created_date: date | None,
+    ) -> date:
+        habit_start = habit.created_at.date() if habit.created_at is not None else target_date
+        if user_created_date is not None and habit_start == user_created_date:
+            # Ignore onboarding day for habits created on the account-creation date.
+            return user_created_date + timedelta(days=1)
+        return habit_start
 
     async def create_habit(self, user_id: int, payload: HabitCreateInput) -> Habit:
         goal_days = payload.goal_days if payload.goal_days is not None and payload.goal_days > 0 else 30
@@ -262,9 +281,14 @@ class HabitService:
         self, user_id: int, target_date: date, slot: TimeSlot | None = None
     ) -> list[Habit]:
         habits = await self.list_habits(user_id=user_id, active_only=True)
+        user_created_date = await self.get_user_created_date(user_id=user_id)
         due: list[Habit] = []
         for habit in habits:
-            active_from = habit.created_at.date() if habit.created_at is not None else target_date
+            active_from = self._habit_effective_start_date(
+                habit=habit,
+                target_date=target_date,
+                user_created_date=user_created_date,
+            )
             if target_date < active_from:
                 continue
             if any(is_rule_due(rule, target_date, slot=slot) for rule in habit.schedule_rules):
