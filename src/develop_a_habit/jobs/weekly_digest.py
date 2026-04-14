@@ -86,7 +86,7 @@ async def send_weekly_digest_if_due(bot: Bot) -> None:
                     )
                 habit_lines.append(
                     (
-                        f"- {icon}{item.name}: {item.weekly_success_days}/{item.weekly_due_days} дн, "
+                        f"- {icon}{item.name}: выполнено в {item.weekly_success_days} из {item.weekly_due_days} дней, "
                         f"держитесь {item.current_streak_days} дн подряд{goal_part}"
                     )
                 )

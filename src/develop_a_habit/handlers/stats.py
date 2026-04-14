@@ -92,7 +92,7 @@ async def _render_stats(target: Message | CallbackQuery, telegram_user_id: int, 
             )
         lines.append(
             (
-                f"- {icon}{item.name}: неделя {item.weekly_success_days}/{item.weekly_due_days} дн, "
+                f"- {icon}{item.name}: выполнено в {item.weekly_success_days} из {item.weekly_due_days} дней, "
                 f"держитесь {item.current_streak_days} дн подряд, "
                 f"всего {item.adherence_days_total} дн{goal_part}"
             )

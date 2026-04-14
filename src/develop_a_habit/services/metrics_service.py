@@ -62,6 +62,9 @@ class MetricsService:
         today: date | None = None,
     ) -> MetricsResult:
         today = today or date.today()
+        effective_end = min(end_date, today)
+        if effective_end < start_date:
+            return MetricsResult(plan_slots=0, completed_slots=0, extra_slots=0)
         plan_slots = 0
         completed_slots = 0
         extra_slots = 0
@@ -69,7 +72,7 @@ class MetricsService:
         pullups_reps = 0
 
         cursor = start_date
-        while cursor <= end_date:
+        while cursor <= effective_end:
             day_off = await self.habit_service.is_day_off(user_id=user_id, target_date=cursor)
             due_habits = await self.habit_service.list_due_habits(user_id=user_id, target_date=cursor)
             checkins = await self.habit_service.get_checkins_for_date(user_id=user_id, target_date=cursor)
@@ -101,10 +104,10 @@ class MetricsService:
                 if total_reps <= 0:
                     continue
 
-                kind = self._classify_exercise_kind(habit.name)
-                if kind == "pushups":
+                kinds = self._classify_exercise_kinds(habit.name)
+                if "pushups" in kinds:
                     pushups_reps += total_reps
-                elif kind == "pullups":
+                if "pullups" in kinds:
                     pullups_reps += total_reps
 
             cursor += timedelta(days=1)
@@ -379,13 +382,14 @@ class MetricsService:
         return False
 
     @staticmethod
-    def _classify_exercise_kind(name: str) -> str | None:
+    def _classify_exercise_kinds(name: str) -> set[str]:
         value = name.lower()
+        result: set[str] = set()
         if "отжим" in value or "push" in value:
-            return "pushups"
+            result.add("pushups")
         if "подтяг" in value or "pull" in value:
-            return "pullups"
-        return None
+            result.add("pullups")
+        return result
 
     @staticmethod
     def _parse_actual_reps_csv(actual_reps_csv: str | None) -> int:

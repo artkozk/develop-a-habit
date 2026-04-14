@@ -97,6 +97,32 @@ def test_negative_past_without_violation_counts_success():
     assert result.plan_completion == 100.0
 
 
+def test_period_metrics_ignores_future_days():
+    monday = date(2026, 4, 13)
+    tuesday = date(2026, 4, 14)
+    sunday = date(2026, 4, 19)
+
+    habit = _habit(5, HabitType.POSITIVE, TimeSlot.MORNING)
+    due_map = {day: [habit] for day in [monday, tuesday, date(2026, 4, 15), date(2026, 4, 16), date(2026, 4, 17), date(2026, 4, 18), sunday]}
+    checkin_map = {
+        monday: [
+            HabitCheckin(
+                habit_id=5,
+                check_date=monday,
+                time_slot=TimeSlot.MORNING,
+                status=CheckinStatus.DONE,
+            )
+        ]
+    }
+
+    service = MetricsService(FakeHabitService(due_map=due_map, day_off_dates=set(), checkin_map=checkin_map))
+    result = asyncio.run(service.compute_period_metrics(1, monday, sunday, today=tuesday))
+
+    # Only Monday+Tuesday are counted; Wed-Sun are future and ignored.
+    assert result.plan_slots == 2
+    assert result.completed_slots == 1
+
+
 def test_stats_include_pullups_and_pushups_reps():
     target = date(2026, 4, 10)
     pullups = _habit(3, HabitType.POSITIVE, TimeSlot.DAY)
@@ -147,3 +173,38 @@ def test_stats_include_pullups_and_pushups_reps():
 
     assert result.pullups_reps == 24
     assert result.pushups_reps == 30
+
+
+def test_combined_exercise_name_counts_for_both_metrics():
+    target = date(2026, 4, 10)
+    combined = _habit(6, HabitType.POSITIVE, TimeSlot.DAY)
+    combined.name = "Отжимания\\подтягивания"
+    combined.is_sport = True
+    combined.sport_base_sets = 2
+    combined.sport_base_reps = 12
+    combined.sport_linear_step_reps = 0
+    combined.sport_progression_enabled = False
+
+    service = MetricsService(
+        FakeHabitService(
+            due_map={target: [combined]},
+            day_off_dates=set(),
+            checkin_map={
+                target: [
+                    HabitCheckin(
+                        habit_id=6,
+                        check_date=target,
+                        time_slot=TimeSlot.DAY,
+                        status=CheckinStatus.DONE,
+                        target_sets=2,
+                        target_reps=12,
+                        sport_plan_adhered=True,
+                    ),
+                ]
+            },
+        )
+    )
+    result = asyncio.run(service.compute_period_metrics(1, target, target, today=target))
+
+    assert result.pullups_reps == 24
+    assert result.pushups_reps == 24
